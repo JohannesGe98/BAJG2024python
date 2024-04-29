@@ -1,0 +1,9 @@
+FROM minio/minio:latest
+USER root
+RUN apt-get update && apt-get install -y tree
+USER miniopython
+
+##Secret Key
+## DXM47X0fkv0fCWcMpY7e445WIY33XttjxKr9IXTn
+## Access Key
+## Hwx5RjGz1UxCvyqZ57iV

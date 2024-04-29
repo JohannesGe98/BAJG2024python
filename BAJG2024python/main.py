@@ -6,7 +6,6 @@ logging.basicConfig(level=logging.DEBUG)
 import pandas as pd
 from io import BytesIO
 
-
 ####################################
 ### import Masterarbeit #######
 
@@ -17,7 +16,7 @@ from sklearn.decomposition import LatentDirichletAllocation
 
 # Word embeddings
 
-###################################
+####################################
 
 # Create a custom SSL context
 context = ssl.create_default_context()
@@ -142,6 +141,7 @@ def lda_term_distribution(texts, num_topics=1):
 
 
 #####################################################################################
+
 
 print("---------------------------------------------------------------------------")
 print("                                    buckets                                ")
