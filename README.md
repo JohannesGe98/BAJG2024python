@@ -1,4 +1,4 @@
-## Repositpry of Johannes Gesk, Bachelor Thesis at Philipps University Marburg 
+## Repository of Johannes Gesk, Bachelor Thesis at Philipps University Marburg 
 
 #### LakeHouse: Virtual Integration on the Dynamic Data of Data Lakes *
 
