@@ -8,7 +8,7 @@ import pandas as pd
 from io import BytesIO
 
 ####################################
-### import Masterarbeit #######
+
 
 # LDA
 from sklearn.feature_extraction.text import CountVectorizer
