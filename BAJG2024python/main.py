@@ -112,6 +112,7 @@ from sklearn.decomposition import LatentDirichletAllocation
 
 #####################################################################################
 #lda_term for the whole bucket
+#####################################################################################
 def lda_term_distribution_all_csvs(bucket_name, num_topics=1):
     # List all objects in the bucket that end with .csv
     objects = client.list_objects(bucket_name, recursive=True)
