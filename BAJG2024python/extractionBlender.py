@@ -9,7 +9,7 @@ import logging
 # Setup logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Initialize MinIO client
+# Minio Settings
 client = Minio(
     "127.0.0.1:9001",
     access_key="d5dwxTDYc6YBZzgEGA5t",

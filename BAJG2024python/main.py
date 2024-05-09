@@ -8,19 +8,25 @@ import os
 import aiohttp
 import asyncio
 import numpy as np
-
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-import pandas as pd
 from io import BytesIO
-
-####################################
-
 import pandas as pd
 
 # LDA
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.decomposition import LatentDirichletAllocation
+
+
+############################################################################
+# Create a MinIO client object with an endpoint and access/secret keys.
+############################################################################
+client = Minio(
+    "127.0.0.1:9001",
+    access_key="d5dwxTDYc6YBZzgEGA5t",
+    secret_key="W7nMjJeIFTbPpQH7ylGmiurHFe1pNFHQEo5X8Dsa",
+    secure=False,
+)
 
 ###################################
 # SSL Troubleshooting
@@ -30,14 +36,6 @@ from sklearn.decomposition import LatentDirichletAllocation
 context = ssl.create_default_context()
 context.check_hostname = False
 context.verify_mode = ssl.CERT_NONE  # Be cautious with this in production
-
-# Create a MinIO client object with an endpoint and access/secret keys.
-client = Minio(
-    "127.0.0.1:9001",
-    access_key="d5dwxTDYc6YBZzgEGA5t",
-    secret_key="W7nMjJeIFTbPpQH7ylGmiurHFe1pNFHQEo5X8Dsa",
-    secure=False,
-)
 
 start_time = time.time()
 
@@ -137,11 +135,15 @@ async def download_model(bucket_name, object_name):
 #####################################################################################
 #lda_term for the whole bucket
 #####################################################################################
+import pandas as pd
+from sklearn.decomposition import LatentDirichletAllocation
+from sklearn.feature_extraction.text import CountVectorizer
+from io import BytesIO
+
 def lda_term_distribution_all_csvs(bucket_name, num_topics=1):
     # List all objects in the bucket that end with .csv
     objects = client.list_objects(bucket_name, recursive=True)
-    all_words = []
-    all_topic_word_dists = []
+    topic_words = {}
 
     for obj in objects:
         if obj.object_name.endswith('.csv'):
@@ -161,7 +163,7 @@ def lda_term_distribution_all_csvs(bucket_name, num_topics=1):
                     stop_words='english',
                     min_df=2,
                     max_df=0.95,
-                    token_pattern=r'(?u)\b[a-zA-Z]+\b'  # Regular expression to match words with only alphabetic characters
+                    token_pattern=r'(?u)\b[a-zA-Z]+\b'  # Filter all non alphabetic words out
                 )
 
                 # Create Document-term matrix
@@ -177,15 +179,38 @@ def lda_term_distribution_all_csvs(bucket_name, num_topics=1):
                 topic_word_distribution = lda_model.components_
                 topic_word_distribution /= topic_word_distribution.sum(axis=1)[:, None]  # Normalize
 
-                # Collect results from all files
-                all_words.append(words)
-                all_topic_word_dists.append(topic_word_distribution)
+                # Store the words with their respective weights per topic
+                file_topics = []
+                for topic_dist in topic_word_distribution:
+                    topic = {word: weight for word, weight in zip(words, topic_dist)}
+                    file_topics.append(topic)
+
+                # Map file name to its topics
+                topic_words[obj.object_name] = file_topics
 
             except Exception as e:
                 print(f"Error processing file {obj.object_name}: {e}")
 
-    return all_words, all_topic_word_dists
+    return topic_words
+
 #########################################################################################
+#print of all_csv_topics
+#########################################################################################
+def print_lda_topics(all_words, all_topic_word_dists):
+   for file_idx, (words, topic_word_dists) in enumerate(zip(all_words, all_topic_word_dists)):
+        print(f"---------------------------------------------------------------------------")
+        print(f"Results for File {file_idx + 1}")
+        print(f"---------------------------------------------------------------------------")
+        for topic_idx, topic_dist in enumerate(topic_word_dists):
+            sorted_word_indices = topic_dist.argsort()[::-1]  # Sort indices of the words in the topic by their contribution
+            print(f"Topic {topic_idx + 1}:")
+            for word_idx in sorted_word_indices[:10]:  # Show top 20 words
+                print(f"{words[word_idx]}: {topic_dist[word_idx]:.4f}")
+            print(f"---------------------------------------------------------------------------")
+
+
+#########################################################################################
+
 # for just one file within the bucket
 
 
@@ -257,40 +282,141 @@ def lda_term_distribution(bucket_name, object_name, num_topics=1):
 
 
 #####################################################################################
-################# LDA and Word2Vec
+#Word2Vec
 #####################################################################################
-
-# embeddings_word2vec.py
-
-#from gensim.models import KeyedVectors
-
+'''
 def embeddings_word2vec(keywords, weights, model):
-    if not isinstance(keywords, (list, tuple)) or not isinstance(weights, (list, tuple)):
-        raise ValueError("Both keywords and weights must be lists or tuples.")
-
+    if not isinstance(model, dict):
+        raise ValueError("Model must be a dictionary of word vectors.")
     embeddings = []
     weights_filtered = []
-    for i, (word, weight) in enumerate(zip(keywords, weights)):
-        print(f"Processing {i+1}/{len(keywords)}: word={word}, type={type(word)}")
-        if isinstance(word, np.ndarray):
-            if word.size == 1:
-                word = str(word.item())
-            else:
-                print("Error: 'word' contains more than one item:", word)
-                continue  # Skip this iteration or handle it appropriately
-        if word in model:
-            embeddings.append(model[word])
-            weights_filtered.append(weight)
+    for keyword, weight in zip(keywords, weights):
+        if keyword in model:
+            embeddings.append(model[keyword])  # Retrieve the embedding
+            weights_filtered.append(weight)    # Append the corresponding weight
+            print(f"{keyword}: {model[keyword]}, weight: {weight}")
         else:
-            print(f"Word not found in model: {word}")
+            print(f"Word not found in model: {keyword}")
+            embeddings.append(np.zeros(300))   # Append a zero vector if keyword not found
+            weights_filtered.append(weight)    # Still append the weight
 
     return list(zip(embeddings, weights_filtered))
+'''
 
+def embeddings_word2vec(keywords, weights, model):
+    if not isinstance(model, dict):
+        raise ValueError("Model must be a dictionary of word vectors.")
+    embeddings = []
+    weights_filtered = []
+    for i, keyword_array in enumerate(keywords):
+        print(f"Processing array {i + 1}/{len(keywords)}")
+        for word in keyword_array:
+            if word in model:
+                embeddings.append(model[word])
+                weights_filtered.append(weights[i])
+                print(word, model[word], weights[i])
+            else:
+                print(f"Word not found in model: {word}")
+
+    return list(tuple(zip(embeddings, weights_filtered)))
+
+#####################################################################################
+#GloVe Adjustments_ Word2Vec
+#####################################################################################
+
+def load_glove_model(file_path):
+    embeddings_index = {}
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            values = line.split()
+            word = values[0]
+            coefs = np.asarray(values[1:], dtype='float32')
+            embeddings_index[word] = coefs
+    return embeddings_index
+
+# Assuming an existing function that fetches top topic words for each document
+# Example function signature: get_topic_words_for_documents()
+# This function needs to be implemented according to how you retrieve topics from LDA
+
+# Function to print embeddings for each topic word of each file
+def print_topic_embeddings(topic_words, glove_model):
+    for file, topics in topic_words.items():
+        print(f"File: {file}")
+        for idx, words_weights in enumerate(topics):
+            print(f" Topic {idx+1}:")
+            for word, weight in words_weights.items():
+                if word in glove_model:
+                    print(f"  {word}: {glove_model[word]}")
+                else:
+                    print(f"  {word}: Embedding not found")
+
+########################################################################################
+# lda_t
+########################################################################################
+
+
+def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
+    # List all objects in the bucket that end with .csv
+    #objects = client.list_objects(bucket_name, recursive=True)
+    all_topic_word_dists = []
+
+    #for obj in objects:
+    if csvName.endswith('.csv'):
+        try:
+            # Fetch CSV file from the bucket
+            response = client.get_object(bucket_name, csvName)
+            data = pd.read_csv(BytesIO(response.read()))
+
+            # Assume text data is in the first column
+            texts = data.iloc[:, 0].astype(str).tolist()
+
+            # Preprocess texts: convert to lowercase and strip spaces
+            texts = [text.lower().strip() for text in texts if isinstance(text, str)]
+
+            # Initialize CountVectorizer
+            vectorizer = CountVectorizer(
+                stop_words='english',
+                min_df=2,
+                max_df=0.95,
+                token_pattern=r'(?u)\b[a-zA-Z]+\b'  # Only include alphabetic words
+            )
+
+            # Create a Document-Term Matrix (DTM)
+            dtm = vectorizer.fit_transform(texts)
+
+            # Define and fit LDA model
+            num_topics = 1  # Identifying one topic since we're extracting top keywords
+            lda_model = LatentDirichletAllocation(n_components=num_topics)
+            lda_model.fit(dtm)
+
+            # Interpret the topic
+            feature_names = vectorizer.get_feature_names_out()
+            topic = lda_model.components_[0]
+            top_words_indices = topic.argsort()[:-numKeywords - 1:-1]
+            top_words = [feature_names[i] for i in top_words_indices]
+            top_weights = [topic[i] for i in top_words_indices]
+
+            # Normalize the weights
+            total_weight = sum(top_weights)
+            normalized_weights = [weight / total_weight for weight in top_weights]
+
+            # Combine top words with their normalized weights
+            topic_words_and_weights = list(zip(top_words, normalized_weights))
+            #all_topic_word_dists.append((csvName, topic_words_and_weights))
+
+        except Exception as e:
+            print(f"Error processing {csvName}: {str(e)}")
+
+    return topic_words_and_weights
+
+
+#####################################################################################
+#Start Calls
+#####################################################################################
 
 print("---------------------------------------------------------------------------")
 print("                                    buckets                                ")
 print("---------------------------------------------------------------------------")
-
 
 try:
     # Example operation: list all buckets
@@ -314,15 +440,15 @@ file_content = testobject.read()
 
 keywords_and_weights = keywords_lda(file_content)
 ### printbefehl. normalerweuise nicht dabei
-for word, weight in keywords_and_weights:
-   print(f"{word}: {weight:.4f}")
+#for word, weight in keywords_and_weights:
+ #  print(f"{word}: {weight:.4f}")
 
 print("---------------------------------------------------------------------------")
 print("                                LDA current                                ")
 print("---------------------------------------------------------------------------")
 
 
-num_topics =1
+num_keywords =10
 
 #words, topic_word_dist = lda_term_distribution("commondatacrawl","CC-MAIN-20150728002301-00000-ip-10-236-191-2.ec2.internal.json.csv", num_topics)
 #words, topic_word_dist = lda_term_distribution(file_content, num_topics)
@@ -346,70 +472,168 @@ print("-------------------------------------------------------------------------
 #wholebucketname = "commondatacrawl"
 wholebucketname = "bagofwordstest"
 
-all_words, all_topic_word_dists= lda_term_distribution_all_csvs(wholebucketname, num_topics)
+#all_words_weigths = lda_term_distribution_all_csvs(wholebucketname, num_topics) for glove shit
+
+
+
 print(f"Now calculating on bucket: Bucket: {wholebucketname}")
-def print_lda_topics(all_words, all_topic_word_dists):
-   for file_idx, (words, topic_word_dists) in enumerate(zip(all_words, all_topic_word_dists)):
-        print(f"---------------------------------------------------------------------------")
-        print(f"Results for File {file_idx + 1}")
-        print(f"---------------------------------------------------------------------------")
-        for topic_idx, topic_dist in enumerate(topic_word_dists):
-            sorted_word_indices = topic_dist.argsort()[::-1]  # Sort indices of the words in the topic by their contribution
-            print(f"Topic {topic_idx + 1}:")
-            for word_idx in sorted_word_indices[:10]:  # Show top 20 words
-                print(f"{words[word_idx]}: {topic_dist[word_idx]:.4f}")
-            print(f"---------------------------------------------------------------------------")
-print_lda_topics(all_words, all_topic_word_dists)
+#print_lda_topics(all_embeddings, all_weights)
+glove_model = load_glove_model("/Users/johannesgesk/Documents_MacIntouch/Philipps_Universität_Marburg/2023WS/Bachelor Arbeit/datasets/GloVe/glove.42B.300d.txt")
+#create_embeddings(all_words_weigths,glove_model)
+print("---------------------------------------------------------------------------")
+print("                                 Word2Vec                                  ")
+print("---------------------------------------------------------------------------")
 
 
 
+
+# Print out the types and shapes/values of i[0] and i[1]
+#for idx, (emb, weight) in enumerate(embedding_weight_pairs):
+ #   print(f"Index {idx}: Type of i[0] = {type(emb)}, Content of i[0] = {emb}")
+  #  print(f"Index {idx}: Type of i[1] = {type(weight)}, Content of i[1] = {weight}")
+ #   if idx == 10:  # Limit output to the first 10 items for brevity
+  #      break
+
+
+def calculateEmbeddings(all_keywords, all_weights, glove_model):
+    embedding_weight_pairs = embeddings_word2vec(all_keywords, all_weights, glove_model)
+    embeddings = np.array([i[0] for i in embedding_weight_pairs],dtype=object)
+    new_weights = np.array([i[1] for i in embedding_weight_pairs],dtype=object)
+
+    return np.array(embeddings, dtype=float), np.array(new_weights, dtype=float)
+
+
+## Out of calculated keywords and embeddings now calculate one representive vector.
+## weight each vector with their corresponding weight.
+##
+def calculateRepresentiveVector(all_keywords, all_weights):
+
+    # Calculate embeddings and weights
+    all_embeddings, embeddings_weights = calculateEmbeddings(all_keywords, all_weights, glove_model)
+
+    # Convert weights into a numpy array for broadcasting if not already
+    if not isinstance(embeddings_weights, np.ndarray):
+        embeddings_weights = np.array(embeddings_weights, dtype=float)
+
+    # Ensure embeddings are numpy arrays and read y for multiplication
+    if isinstance(all_embeddings[0], list):  # Assuming embeddings are lists, not numpy arrays
+        all_embeddings = np.array(all_embeddings, dtype=float)
+    print("test")
+    print(embeddings_weights)
+    # Multiply each embedding by its corresponding weight
+    weighted_embeddings = np.multiply(all_embeddings, embeddings_weights[:, np.newaxis])
+    print(weighted_embeddings)
+    #representiveVector = all_embeddings*weighted_embeddings
+    return weighted_embeddings
+    '''all_embeddings, embeddings_weights = calculateEmbeddings(all_keywords, all_weights, glove_model)
+    print("Test1")
+    print(embeddings_weights)
+    weighted_embeddings = np.multiply(all_embeddings, embeddings_weights[:, np.newaxis])
+    #for i in enumerate(all_embeddings):
+    print("Hallo")
+    print(weighted_embeddings)
+    '''
+
+def initializeLake(bucket_name):
+    objects = client.list_objects(bucket_name, recursive=True)
+    for obj in objects:
+        objName = obj.object_name
+        new_keywords = new_lda_term_distribution_all_csv(bucket_name, objName, num_keywords)
+        all_keywords = [t[0] for t in new_keywords]
+        all_weights = [t[1] for t in new_keywords]
+        representiveVector = calculateRepresentiveVector(all_keywords, all_weights)
+        print(f"{objName}: {representiveVector}")
+
+initializeLake(wholebucketname)
 
 
 print("---------------------------------------------------------------------------")
-print("                      Word2Vec for just one Document                      ")
+print("                                WIGHGTS                            ")
 print("---------------------------------------------------------------------------")
 
+
+
+
+#representative_vector = np.sum(weighted_embeddings, axis=0)
+
+#print(representative_vector)
+
+####################################
+#backup if file is too big
+###################################
+
+'''
 #TestTheFunction
 bucketName = "modelbucket"
 fileName = "glove.42B.300d.txt"
 
-
-#word2vec_pretrained_model = client.get_object(bucketName, fileName)
-#model_data = word2vec_pretrained_model.read()
-#model_data.decode('utf-8')
 async def download_and_read_model(bucket_name, object_name):
     url = client.presigned_get_object(bucket_name, object_name)
+    model = {}
+
+    # Setting up an HTTP session
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
             if response.status == 200:
-                # Read content and decode it
-                content = await response.read()
-                return content.decode('utf-8')
+                print(f"Response status: {response.status} OK")
+                # Reading the response content as text
+                text = await response.text()
+                lines = text.strip().split('\n')
+                for line in lines:
+                    parts = line.split()
+                    if len(parts) > 1:
+                        word = parts[0]
+                        try:
+                            # Ensure that vector parts can be converted to floats
+                            vector = list(map(float, parts[1:]))
+                            model[word] = vector
+                        except ValueError:
+                            print(f"Skipping line due to error converting to float: {line}")
+                            continue
             else:
-                print("Failed to download the model.")
+                print(f"Failed to download the model, status code: {response.status}")
                 return None
+    return model
 
-async def main():
 
-    bucketName = "modelbucket"
-    fileName = "glove.42B.300d.txt"
+#async def main():
+    local_path = '/Users/johannesgesk/Documents_MacIntouch/Philipps_Universität_Marburg/2023WS/Bachelor Arbeit/datasets/GloVe/glove.42B.300d.txt'
+    model_data = None
 
-    # Download and read model data
-    model_data = await download_and_read_model(bucketName, fileName)
-    if model_data:
-        # Process your model data
-        print(model_data[:500])  # Print the first 500 characters of the model data
-        keyword_embeddings = embeddings_word2vec(all_words, all_topic_word_dists, model_data)
-        print(keyword_embeddings)
+    # Check if the model exists locally
+    if os.path.exists(local_path):
+        # Load local model data
+        print("Local use")
+        with open(local_path, 'r', encoding='utf-8') as file:
+            model_data = file.read()
+            print(model_data[:500])  # Print the first 500 characters of the model data
+            #################
+
+            ###########
     else:
-        #adjust###############################
-        model_data = '/Users/johannesgesk/Documents_MacIntouch/Philipps_Universität_Marburg/2023WS/Bachelor Arbeit/datasets/GloVe/glove.42B.300d.txt'
-        print(model_data[:500])  # Print the first 500 characters of the model data
-        keyword_embeddings = embeddings_word2vec(all_words, all_topic_word_dists, model_data)
-        print(keyword_embeddings)
+        print("Download started")
+        # Download and read model data if not available locally
+        bucketName = "modelbucket"
+        fileName = "glove.42B.300d.txt"
+        model_data = await download_and_read_model(bucketName, fileName)
+        if model_data:
+            print(model_data[:500])  # Print the first 500 characters of the model data
+        else:
+            print("Failed to retrieve the model.")
+
+    if model_data:
+        print("Now working on vector calculation")
+        #keyword_embeddings = embeddings_word2vec(all_words, all_topic_word_dists, model_data)
+        #print(keyword_embeddings)
+        test_words = ['king', 'queen', 'man', 'woman']
+        for word in test_words:
+            if word in model_data:
+                print(f"Vector for '{word}':", model_data[word][:5])  # Show first 5 elements of vector
+            else:
+                print(f"Word '{word}' not found in model.")
 asyncio.run(main())
 
-
+'''
 
 print("---------------------------------------------------------------------------")
 print("                     Model loaded                                          ")
@@ -420,8 +644,12 @@ print("-------------------------------------------------------------------------
 
 
 print("---------------------------------------------------------------------------")
-print("                      Word2Vec for the whole Bucket                        ")
+print("                      Word2Vec Glove                                       ")
 print("---------------------------------------------------------------------------")
+
+
+path = ' local_path = ''/Users/johannesgesk/Documents_MacIntouch/Philipps_Universität_Marburg/2023WS/Bachelor Arbeit/datasets/GloVe/glove.42B.300d.txt'
+
 
 
 
