@@ -1,21 +1,20 @@
-import time
+import logging
 import re
+import ssl
+import time
+
+import aiohttp
+import numpy as np
 from minio import Minio
 from minio.error import S3Error
-import ssl
-import logging
-import os
-import aiohttp
-import asyncio
-import numpy as np
+import boto3
+from botocore.client import Config
+from numpy import matrix
+from sklearn.metrics.pairwise import cosine_similarity
+
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-from io import BytesIO
-import pandas as pd
-
 # LDA
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.decomposition import LatentDirichletAllocation
 
 
 ############################################################################
@@ -41,7 +40,7 @@ start_time = time.time()
 
 
 #########################################################################
-                    # Use the minio bucket Text for LDA
+# Use the minio bucket Text for LDA
 #########################################################################
 #########################################################################
 def fetch_texts_from_minio(bucket_name):
@@ -52,7 +51,15 @@ def fetch_texts_from_minio(bucket_name):
             response = client.get_object(bucket_name, obj.object_name)
             # Read the CSV and extract text from the first column
             try:
-                csv_content = pd.read_csv(BytesIO(response.read()))
+                csv_content = pd.read_csv(BytesIO(response.read()), lineterminator='\n')
+                response = client.get_object(bucket_name, obj.object_name)
+                metadata = response.get('Metadata', {})
+                print("Metadata for the object:", metadata)
+
+                # error_bad_lines=False,  # Skip bad lines
+                # warn_bad_lines=True,    # Warn about those lines
+                # low_memory=False
+
                 if not csv_content.empty:
                     first_column = csv_content.iloc[:, 0]  # Assume text is in the first column
                     texts.extend(first_column.astype(str).tolist())
@@ -64,10 +71,11 @@ def fetch_texts_from_minio(bucket_name):
                 response.close()
     return texts
 
+
 ####
 
 
-def keywords_lda(text, numKeywords = 10):
+def keywords_lda(text, numKeywords=10):
     # Function to extract keywords from text using LDA
 
     # Document-Term Matrix
@@ -90,30 +98,20 @@ def keywords_lda(text, numKeywords = 10):
     total_weight = sum(top_weights)
     normalized_weights = [weight / total_weight for weight in top_weights]
 
-
-
     # Store the top words and normalized weights in variables
     ### original
     topic_words_and_weights = list(zip(top_words, normalized_weights))
     ###
     topic_words_and_weights = [
-        (f"{index+1}: {word}", weight)
+        (f"{index + 1}: {word}", weight)
         for index, (word, weight) in enumerate(zip(top_words, normalized_weights))
     ]
 
-
     return topic_words_and_weights
-
-def vector_LDA(text):
-    num_topics=1
-    vectorizer = CountVectorizer()
-    dtm = vectorizer.fit_transform([text])
-    lda_model = LatentDirichletAllocation(n_components=num_topics)
-    lda_model.fit(dtm)
 
 
 ####################################################################################
-                #   MINO ASYNC
+#   MINO ASYNC
 ####################################################################################
 
 async def download_model(bucket_name, object_name):
@@ -132,13 +130,15 @@ async def download_model(bucket_name, object_name):
             else:
                 print("Failed to download the model.")
 
+
 #####################################################################################
-#lda_term for the whole bucket
+# lda_term for the whole bucket
 #####################################################################################
 import pandas as pd
 from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer
 from io import BytesIO
+
 
 def lda_term_distribution_all_csvs(bucket_name, num_topics=1):
     # List all objects in the bucket that end with .csv
@@ -193,16 +193,18 @@ def lda_term_distribution_all_csvs(bucket_name, num_topics=1):
 
     return topic_words
 
+
 #########################################################################################
-#print of all_csv_topics
+# print of all_csv_topics
 #########################################################################################
 def print_lda_topics(all_words, all_topic_word_dists):
-   for file_idx, (words, topic_word_dists) in enumerate(zip(all_words, all_topic_word_dists)):
+    for file_idx, (words, topic_word_dists) in enumerate(zip(all_words, all_topic_word_dists)):
         print(f"---------------------------------------------------------------------------")
         print(f"Results for File {file_idx + 1}")
         print(f"---------------------------------------------------------------------------")
         for topic_idx, topic_dist in enumerate(topic_word_dists):
-            sorted_word_indices = topic_dist.argsort()[::-1]  # Sort indices of the words in the topic by their contribution
+            sorted_word_indices = topic_dist.argsort()[
+                                  ::-1]  # Sort indices of the words in the topic by their contribution
             print(f"Topic {topic_idx + 1}:")
             for word_idx in sorted_word_indices[:10]:  # Show top 20 words
                 print(f"{words[word_idx]}: {topic_dist[word_idx]:.4f}")
@@ -210,7 +212,6 @@ def print_lda_topics(all_words, all_topic_word_dists):
 
 
 #########################################################################################
-
 # for just one file within the bucket
 
 
@@ -262,11 +263,10 @@ def lda_term_distribution(bucket_name, object_name, num_topics=1):
 
     return words, topic_word_distribution
 
-
-#####################################################################################
-    #Representation of Words and Topic Word Distribution
-#####################################################################################
-#if __name__ == "__main__":
+    #####################################################################################
+    # Representation of Words and Topic Word Distribution
+    #####################################################################################
+    # if __name__ == "__main__":
     bucket_name = "commondatacrawl"
     texts = fetch_texts_from_minio(bucket_name)
     if texts:
@@ -282,7 +282,7 @@ def lda_term_distribution(bucket_name, object_name, num_topics=1):
 
 
 #####################################################################################
-#Word2Vec
+# Word2Vec
 #####################################################################################
 '''
 def embeddings_word2vec(keywords, weights, model):
@@ -303,25 +303,29 @@ def embeddings_word2vec(keywords, weights, model):
     return list(zip(embeddings, weights_filtered))
 '''
 
+
 def embeddings_word2vec(keywords, weights, model):
     if not isinstance(model, dict):
         raise ValueError("Model must be a dictionary of word vectors.")
+    print('rettung5', keywords)
     embeddings = []
     weights_filtered = []
-    for i, keyword_array in enumerate(keywords):
+    i = 0
+    for word, weight in enumerate(keywords, weights):
+        i = i +1
         print(f"Processing array {i + 1}/{len(keywords)}")
-        for word in keyword_array:
-            if word in model:
+        if word in model:
                 embeddings.append(model[word])
-                weights_filtered.append(weights[i])
-                print(word, model[word], weights[i])
-            else:
-                print(f"Word not found in model: {word}")
+                weights_filtered.append(weights)
+                print('rettung7',word, model[word], weights)
+        #else:
+            #   print(f"Word not found in model: {word}")
 
     return list(tuple(zip(embeddings, weights_filtered)))
 
+
 #####################################################################################
-#GloVe Adjustments_ Word2Vec
+# GloVe Adjustments_ Word2Vec
 #####################################################################################
 
 def load_glove_model(file_path):
@@ -334,6 +338,7 @@ def load_glove_model(file_path):
             embeddings_index[word] = coefs
     return embeddings_index
 
+
 # Assuming an existing function that fetches top topic words for each document
 # Example function signature: get_topic_words_for_documents()
 # This function needs to be implemented according to how you retrieve topics from LDA
@@ -343,12 +348,13 @@ def print_topic_embeddings(topic_words, glove_model):
     for file, topics in topic_words.items():
         print(f"File: {file}")
         for idx, words_weights in enumerate(topics):
-            print(f" Topic {idx+1}:")
+            print(f" Topic {idx + 1}:")
             for word, weight in words_weights.items():
                 if word in glove_model:
                     print(f"  {word}: {glove_model[word]}")
                 else:
                     print(f"  {word}: Embedding not found")
+
 
 ########################################################################################
 # lda_t
@@ -357,14 +363,16 @@ def print_topic_embeddings(topic_words, glove_model):
 
 def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
     # List all objects in the bucket that end with .csv
-    #objects = client.list_objects(bucket_name, recursive=True)
+    # objects = client.list_objects(bucket_name, recursive=True)
     all_topic_word_dists = []
 
-    #for obj in objects:
+    # for obj in objects:
     if csvName.endswith('.csv'):
         try:
             # Fetch CSV file from the bucket
             response = client.get_object(bucket_name, csvName)
+            stat = client.stat_object(bucket_name, csvName)
+            print("Metadata:", stat.metadata)
             data = pd.read_csv(BytesIO(response.read()))
 
             # Assume text data is in the first column
@@ -385,7 +393,7 @@ def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
             dtm = vectorizer.fit_transform(texts)
 
             # Define and fit LDA model
-            num_topics = 1  # Identifying one topic since we're extracting top keywords
+            num_topics = 1  # Identifying one topic since we're extracting k keywords
             lda_model = LatentDirichletAllocation(n_components=num_topics)
             lda_model.fit(dtm)
 
@@ -402,7 +410,7 @@ def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
 
             # Combine top words with their normalized weights
             topic_words_and_weights = list(zip(top_words, normalized_weights))
-            #all_topic_word_dists.append((csvName, topic_words_and_weights))
+            # all_topic_word_dists.append((csvName, topic_words_and_weights))
 
         except Exception as e:
             print(f"Error processing {csvName}: {str(e)}")
@@ -411,11 +419,11 @@ def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
 
 
 #####################################################################################
-#Start Calls
+# Start Calls
 #####################################################################################
 
 print("---------------------------------------------------------------------------")
-print("                                    buckets                                ")
+print("                              buckets online                               ")
 print("---------------------------------------------------------------------------")
 
 try:
@@ -428,7 +436,6 @@ except S3Error as e:
 except Exception as e:
     print(f"An unexpected error occurred: {e}")
 
-
 print("---------------------------------------------------------------------------")
 print("                     Latent Dirichlent Allocation one word                 ")
 print("---------------------------------------------------------------------------")
@@ -438,68 +445,66 @@ fileName = "22745259_0_4052170081208609462.csv"
 testobject = client.get_object(bucketName, fileName)
 file_content = testobject.read()
 
-keywords_and_weights = keywords_lda(file_content)
+# keywords_and_weights = keywords_lda(file_content)
 ### printbefehl. normalerweuise nicht dabei
-#for word, weight in keywords_and_weights:
- #  print(f"{word}: {weight:.4f}")
+# for word, weight in keywords_and_weights:
+#  print(f"{word}: {weight:.4f}")
 
 print("---------------------------------------------------------------------------")
 print("                                LDA current                                ")
 print("---------------------------------------------------------------------------")
 
+num_keywords = 10
 
-num_keywords =10
-
-#words, topic_word_dist = lda_term_distribution("commondatacrawl","CC-MAIN-20150728002301-00000-ip-10-236-191-2.ec2.internal.json.csv", num_topics)
-#words, topic_word_dist = lda_term_distribution(file_content, num_topics)
+# words, topic_word_dist = lda_term_distribution("commondatacrawl","CC-MAIN-20150728002301-00000-ip-10-236-191-2.ec2.internal.json.csv", num_topics)
+# words, topic_word_dist = lda_term_distribution(file_content, num_topics)
 
 
 print("---------------------------------------------------------------------------")
 print("                                One File                                   ")
 print("---------------------------------------------------------------------------")
 # Print words with highest probability in each topic
-#for topic_idx, topic_dist in enumerate(topic_word_dist):
-  #  sorted_word_indices = topic_dist.argsort()[::-1]
-   # print("---------------------------------------------------------------------------")
-   # print(f"Topic {topic_idx + 1}:")
-   # for word_idx in sorted_word_indices[:20]:
-     #   print(f"{words[word_idx]}: {topic_dist[word_idx]:.4f}")
+# for topic_idx, topic_dist in enumerate(topic_word_dist):
+#  sorted_word_indices = topic_dist.argsort()[::-1]
+# print("---------------------------------------------------------------------------")
+# print(f"Topic {topic_idx + 1}:")
+# for word_idx in sorted_word_indices[:20]:
+#   print(f"{words[word_idx]}: {topic_dist[word_idx]:.4f}")
 
 print("---------------------------------------------------------------------------")
 print("                                Whole Bucket                               ")
 print("---------------------------------------------------------------------------")
 
-#wholebucketname = "commondatacrawl"
+# wholebucketname = "commondatacrawl"
 wholebucketname = "bagofwordstest"
 
-#all_words_weigths = lda_term_distribution_all_csvs(wholebucketname, num_topics) for glove shit
-
+# all_words_weigths = lda_term_distribution_all_csvs(wholebucketname, num_topics) for glove shit
 
 
 print(f"Now calculating on bucket: Bucket: {wholebucketname}")
-#print_lda_topics(all_embeddings, all_weights)
-glove_model = load_glove_model("/Users/johannesgesk/Documents_MacIntouch/Philipps_Universität_Marburg/2023WS/Bachelor Arbeit/datasets/GloVe/glove.42B.300d.txt")
-#create_embeddings(all_words_weigths,glove_model)
+# print_lda_topics(all_embeddings, all_weights)
+glove_model = load_glove_model(
+    "/Users/johannesgesk/Documents_MacIntouch/Philipps_Universität_Marburg/2023WS/Bachelor Arbeit/datasets/GloVe/glove.42B.300d.txt")
+# create_embeddings(all_words_weigths,glove_model)
 print("---------------------------------------------------------------------------")
 print("                                 Word2Vec                                  ")
 print("---------------------------------------------------------------------------")
 
 
-
-
 # Print out the types and shapes/values of i[0] and i[1]
-#for idx, (emb, weight) in enumerate(embedding_weight_pairs):
- #   print(f"Index {idx}: Type of i[0] = {type(emb)}, Content of i[0] = {emb}")
-  #  print(f"Index {idx}: Type of i[1] = {type(weight)}, Content of i[1] = {weight}")
- #   if idx == 10:  # Limit output to the first 10 items for brevity
-  #      break
+# for idx, (emb, weight) in enumerate(embedding_weight_pairs):
+#   print(f"Index {idx}: Type of i[0] = {type(emb)}, Content of i[0] = {emb}")
+#  print(f"Index {idx}: Type of i[1] = {type(weight)}, Content of i[1] = {weight}")
+#   if idx == 10:  # Limit output to the first 10 items for brevity
+#      break
 
 
 def calculateEmbeddings(all_keywords, all_weights, glove_model):
     embedding_weight_pairs = embeddings_word2vec(all_keywords, all_weights, glove_model)
-    embeddings = np.array([i[0] for i in embedding_weight_pairs],dtype=object)
-    new_weights = np.array([i[1] for i in embedding_weight_pairs],dtype=object)
-
+    # check format
+    embeddings = np.array([i[0] for i in embedding_weight_pairs], dtype=object)
+    new_weights = np.array([i[1] for i in embedding_weight_pairs], dtype=object)
+    print('rettung4', embeddings.shape)
     return np.array(embeddings, dtype=float), np.array(new_weights, dtype=float)
 
 
@@ -507,60 +512,391 @@ def calculateEmbeddings(all_keywords, all_weights, glove_model):
 ## weight each vector with their corresponding weight.
 ##
 def calculateRepresentiveVector(all_keywords, all_weights):
-
     # Calculate embeddings and weights
+    print('rettung2', all_keywords)
     all_embeddings, embeddings_weights = calculateEmbeddings(all_keywords, all_weights, glove_model)
 
     # Convert weights into a numpy array for broadcasting if not already
-    if not isinstance(embeddings_weights, np.ndarray):
-        embeddings_weights = np.array(embeddings_weights, dtype=float)
+    #if not isinstance(embeddings_weights, np.ndarray):
+     #   embeddings_weights = np.array(embeddings_weights, dtype=float)
 
     # Ensure embeddings are numpy arrays and read y for multiplication
-    if isinstance(all_embeddings[0], list):  # Assuming embeddings are lists, not numpy arrays
-        all_embeddings = np.array(all_embeddings, dtype=float)
-    print("test")
-    print(embeddings_weights)
+    #if isinstance(all_embeddings[0], list):  # Assuming embeddings are lists, not numpy arrays
+     #   all_embeddings = np.array(all_embeddings, dtype=float)
+
+    print("---------------------------------------------------------------------------")
+    print("                                 WEIGHTS                                    ")
+    print("---------------------------------------------------------------------------")
+    # print(embeddings_weights)
+
     # Multiply each embedding by its corresponding weight
     weighted_embeddings = np.multiply(all_embeddings, embeddings_weights[:, np.newaxis])
-    print(weighted_embeddings)
-    #representiveVector = all_embeddings*weighted_embeddings
+    print('rettung6', weighted_embeddings)
+    # print(weighted_embeddings)
+
     return weighted_embeddings
-    '''all_embeddings, embeddings_weights = calculateEmbeddings(all_keywords, all_weights, glove_model)
-    print("Test1")
-    print(embeddings_weights)
-    weighted_embeddings = np.multiply(all_embeddings, embeddings_weights[:, np.newaxis])
-    #for i in enumerate(all_embeddings):
-    print("Hallo")
-    print(weighted_embeddings)
-    '''
+
+def calculateRepresentiveVectorForQuery(csvName, all_keywords, all_weights):
+    all_representive_vectors_query_ = []
+    csvNameStorage = {}
+    representiveVector = calculateRepresentiveVector(all_keywords, all_weights)
+    print(f"Querydocument {csvName}: {representiveVector}")
+    all_representive_vectors_query_.append(representiveVector)
+
+    # Store all_representive_vectors wihtin a 2D Matrix. Each row is a 300 dimensional vector
+
+
+    all_representive_vectors_matrix = np.vstack(all_representive_vectors_query_)
+    csvNameStorage[0] = csvName
+    return all_representive_vectors_matrix, csvNameStorage
+
 
 def initializeLake(bucket_name):
     objects = client.list_objects(bucket_name, recursive=True)
+    all_representive_vectors = []
+    csv_name_storage = {}
+    i = 0
     for obj in objects:
+        # get the Name of the current csv.file
         objName = obj.object_name
+
+        # store the name into an array
+
+        csv_name_storage[i] = objName
+        i = i + 1
+        # get the top k keywords of the csv file.
         new_keywords = new_lda_term_distribution_all_csv(bucket_name, objName, num_keywords)
         all_keywords = [t[0] for t in new_keywords]
+        print('Rettung', all_keywords)
         all_weights = [t[1] for t in new_keywords]
         representiveVector = calculateRepresentiveVector(all_keywords, all_weights)
         print(f"{objName}: {representiveVector}")
+        all_representive_vectors.append(representiveVector)
 
-initializeLake(wholebucketname)
+    # Store all_representive_vectors wihtin a 2D Matrix. Each row is a 300 dimensional vector
+    all_representive_vectors_matrix = np.vstack(all_representive_vectors)
 
+    return all_representive_vectors_matrix, csv_name_storage
+
+
+all_calculated_representive_vectors, csv_file_names = initializeLake(wholebucketname)
+
+
+#####################################################################################################################
+##########################################create hypertables
+#####################################################################################################################
+####################################################################################################################
+
+def nearest_neighbor(queryvektor, all_calculated_representive_vectors1, k=1):
+    """
+    Input:
+      - v, the vector you are going find the nearest neighbor for
+      - candidates: a set of vectors where we will find the neighbors
+      - k: top k nearest neighbors to find
+    Output:
+      - k_idx: the indices of the top k closest vectors in sorted form
+    """
+    ### START CODE HERE (REPLACE INSTANCES OF 'None' with your code) ###
+    similarity_l = []
+
+    # for each candidate vector...
+    for representativeVector in all_calculated_representive_vectors1:
+        representativeVector_adj = representativeVector.reshape(1, -1)
+        # get the cosine similarity
+        cos_similarity1 = cosine_similarity(queryvektor, representativeVector_adj)
+        # append the similarity to the list
+        similarity_l.append(cos_similarity1[0][0])
+
+    # sort the similarity list and get the indices of the sorted list
+    sorted_ids = np.argsort(similarity_l)
+
+    # get the indices of the k most similar candidate vectors
+    k_idx = sorted_ids[-k:]
+    ### END CODE HERE ###
+    print('Hilfe', k_idx)
+    return k_idx
+
+
+print(print(f"shape of document_vecs {all_calculated_representive_vectors.shape}"))
+
+#########################################################################################################################################
+######################################### LSH start#
+########################################################################################################################################
+# Parameters
+N_DIMS = 300  # Dimension of your vectors
+num_hyperplanes = 2  # Number of hyperplanes (hash functions)
+num_repeat_process = 1
+
+planes_l = [np.random.normal(size=(N_DIMS, num_hyperplanes))
+            for _ in range(num_repeat_process)]
+
+print(len(planes_l))  # 25 ways to devide the space
+print(len(planes_l[0]))  # 300 dimensional space
+print(len(planes_l[0][0]))  # 10 planes in each space
+
+
+# for the set of planes,
+# calculate the dot product between the vector and the matrix containing the planes
+# remember that planes has shape (300, 10)
+# The dot product will have the shape (1,10)
+def hash_value_of_vector(v, planes):
+    dot_product = np.dot(v, planes)  # This caluclates the positoin of the vector for each n dimensional line
+
+    # get the sign of the dot product (1,10) shaped vector
+    sign_of_dot_product = np.sign(dot_product)
+
+    # set h to be false (eqivalent to 0 when used in operations) if the sign is negative,
+    # and true (equivalent to 1) if the sign is positive (1,10) shaped vector
+    h = sign_of_dot_product >= 0
+
+    # remove extra un-used dimensions (convert this from a 2D to a 1D array)
+    h = np.squeeze(h)
+
+    # initialize the hash value to 0
+    hash_value = 0
+
+    n_planes = planes.shape[1]
+    for i in range(n_planes):
+        # increment the hash value by 2^i * h_i
+        hash_value += np.power(2, i) * h[i]
+
+    # cast hash_value as an integer
+
+
+    hash_value = int(hash_value)
+    print('Hash value of vector', hash_value)
+    return hash_value
+
+
+np.random.seed(0)
+idx = 0
+planes = planes_l[idx]  # get one 'universe' of planes to test the function
+vec = np.random.rand(1, 300)
+print(f" The hash value for this vector,",
+      f"and the set of planes at index {idx},",
+      f"is {hash_value_of_vector(vec, planes)}")
+
+print("Done")
+
+
+# This is the code used to create a hash table: feel free to read over it
+def make_hash_table(vecs, planes):
+    """
+    Input:
+        - vecs: list of vectors to be hashed.
+        - planes: the matrix of planes in a single "universe", with shape (embedding dimensions, number of planes).
+    Output:
+        - hash_table: dictionary - keys are hashes, values are lists of vectors (hash buckets)
+        - id_table: dictionary - keys are hashes, values are list of vectors id's
+                            (it's used to know which tweet corresponds to the hashed vector)
+    """
+
+    # number of planes is the number of columns in the planes matrix
+    num_of_planes = planes.shape[1]
+
+    # number of buckets is 2^(number of planes)
+    num_buckets = 2 ** num_of_planes
+
+    # create the hash table as a dictionary.
+    # Keys are integers (0,1,2.. number of buckets)
+    # Values are empty lists
+    hash_table = {i: [] for i in range(num_buckets)}
+
+    # create the id table as a dictionary.
+    # Keys are integers (0,1,2... number of buckets)
+    # Values are empty lists
+    id_table = {i: [] for i in range(num_buckets)}
+
+    # for each vector in 'vecs'
+    for i, v in enumerate(vecs):
+        # calculate the hash value for the vector
+        h = hash_value_of_vector(v, planes)
+
+        # store the vector into hash_table at key h,
+        # by appending the vector v to the list at key h
+        hash_table[h].append(v)
+
+        # store the vector's index 'i' (each document is given a unique integer 0,1,2...)
+        # the key is the h, and the 'i' is appended to the list at key h
+        id_table[h].append(i)
+
+    return hash_table, id_table
+
+
+# You do not have to input any code in this cell, but it is relevant to grading, so please do not change anything
+
+np.random.seed(0)
+planes = planes_l[0]  # get one 'universe' of planes to test the function
+vec = np.random.rand(1, 300)
+tmp_hash_table, tmp_id_table = make_hash_table(vec, planes)
+
+print(f"The hash table at key 0 has {len(tmp_hash_table[0])} document vectors")
+print(f"The id table at key 0 has {len(tmp_id_table[0])}")
+print(f"The first 5 document indices stored at key 0 of are {tmp_id_table[0][0:5]}")
+
+######################################
+# create hash table
+# Creating the hashtables
+hash_tables = []
+id_tables = []
+for universe_id in range(num_repeat_process):  # there are 25 hashes
+    print('working on hash universe #:', universe_id)
+    planes = planes_l[universe_id]
+    hash_table, id_table = make_hash_table(all_calculated_representive_vectors, planes)
+    hash_tables.append(hash_table)
+    id_tables.append(id_table)
 
 print("---------------------------------------------------------------------------")
-print("                                WIGHGTS                            ")
+print("                     LSH                                                   ")
 print("---------------------------------------------------------------------------")
 
 
+#####################################################################################################################
+##########################################create hypertables
+#####################################################################################################################
+
+# UNQ_C21 (UNIQUE CELL IDENTIFIER, DO NOT EDIT)
+# This is the code used to do the fast nearest neighbor search. Feel free to go over it
+# def approximate_knn(doc_id, v, planes_l, k=1, num_universes_to_use=num_repeat_process):
+def approximate_knn(csvName, v, planes_l, k=1, num_universes_to_use=num_repeat_process):
+    """Search for k-NN using hashes."""
+    assert num_universes_to_use <= num_repeat_process
+
+    # Vectors that will be checked as p0ossible nearest neighbor
+    vecs_to_consider_l = list()
+
+    # list of document IDs
+    ids_to_consider_l = list()
+
+    # create a set for ids to consider, for faster checking if a document ID already exists in the set
+    ids_to_consider_set = set()
+
+    # loop through the universes of planes
+    for universe_id in range(num_universes_to_use):
+
+        # get the set of planes from the planes_l list, for this particular universe_id
+        planes3 = planes_l[universe_id]
+
+        # get the hash value of the vector for this set of planesx
+        hash_value = hash_value_of_vector(v, planes3)
+
+        # get the hash table for this particular universe_id
+        hash_table = hash_tables[universe_id]
+
+        # get the list of document vectors for this hash table, where the key is the hash_value
+        document_vectors_l = hash_table[hash_value]
+
+        # get the id_table for this particular universe_id
+        id_table = id_tables[universe_id]
+
+        # get the subset of documents to consider as nearest neighbors from this id_table dictionary
+        new_ids_to_consider = id_table[hash_value]
+
+        ### START CODE HERE (REPLACE INSTANCES OF 'None' with your code) ###
 
 
-#representative_vector = np.sum(weighted_embeddings, axis=0)
+        # remove the id of the document that we're searching
+        if csvName in new_ids_to_consider:
+            new_ids_to_consider.remove(csvName)
+            print(f"removed doc_id {csvName} of input vector from new_ids_to_search")
 
-#print(representative_vector)
+        # loop through the subset of document vectors to consider
+        for i, new_id in enumerate(new_ids_to_consider):
 
-####################################
-#backup if file is too big
-###################################
+            # if the document ID is not yet in the set ids_to_consider...
+            if new_id not in ids_to_consider_set:
+                # access document_vectors_l list at index i to get the embedding
+                # then append it to the list of vectors to consider as possible nearest neighbors
+                document_vector_at_i = document_vectors_l[i]
+
+                # append the new_id (the index for the document) to the list of ids to consider
+                vecs_to_consider_l.append(document_vector_at_i)
+                ids_to_consider_l.append(new_id)
+                # also add the new_id to the set of ids to consider
+                # (use this to check if new_id is not already in the IDs to consider)
+                ids_to_consider_set.add(new_id)
+
+        ### END CODE HERE ###
+
+    # Now run k-NN on the smaller set of vecs-to-consider.
+    print("Fast considering %d vecs" % len(vecs_to_consider_l))
+
+    # convert the vecs to consider set to a list, then to a numpy array
+    vecs_to_consider_arr = np.array(vecs_to_consider_l)
+    v_array = np.array(v).reshape(1, -1)
+
+    # call nearest neighbors on the reduced list of candidate vectors
+    nearest_neighbor_idx_l = nearest_neighbor(v_array, vecs_to_consider_arr, k=k)
+    print('Runboy', nearest_neighbor_idx_l)
+    print('Runbnoy', ids_to_consider_l)
+    # Use the nearest neighbor index list as indices into the ids to consider
+    # create a list of nearest neighbors by the document ids
+    ids_to_consider_np = np.array(ids_to_consider_l)
+    nearest_neighbor_ids = ids_to_consider_np[nearest_neighbor_idx_l]
+
+    #nearest_neighbor_ids = [ids_to_consider_l[idx] for idx in nearest_neighbor_idx_l]
+
+    #nearest_neighbor_ids = [ids_to_consider_l[idx[0]] for idx in nearest_neighbor_idx_l]
+    return nearest_neighbor_ids
+
+
+###############################################################################################
+# search document
+###############################################################################################
+
+print("---------------------------------------------------------------------------")
+print("                      Search Funtion                                       ")
+print("---------------------------------------------------------------------------")
+
+
+def searchQueryDocument(bucketName, csvName, num_keywords):
+    queryresult_vector = []
+
+    new_keywords = new_lda_term_distribution_all_csv(bucketName, csvName, num_keywords)
+    all_keywords1 = [t[0] for t in new_keywords]
+    all_weights1 = [t[1] for t in new_keywords]
+    representiveVector, vec_csv_Name = calculateRepresentiveVectorForQuery(csvName, all_keywords1, all_weights1)
+
+    #print(representiveVector)
+    queryresult_vector.append(representiveVector)
+
+    representiveVector_matrix = np.vstack(queryresult_vector)
+
+    vec_to_search = representiveVector_matrix[0]
+
+    #print(vec_to_search)
+
+    nearest_neighbor_ids = approximate_knn(vec_csv_Name, vec_to_search, planes_l, k=3, num_universes_to_use=1)
+
+    print(f"Nearest neighbors for document {csvName}")
+
+    #print("")
+
+    for neighbor_id in nearest_neighbor_ids:
+        print(f"Nearest neighbor at document id {neighbor_id}")
+    # print(f"document contents: {[neighbor_id]}")
+
+
+searchQueryDocument("commondatacrawl2", "22745259_0_4052170081208609462.csv", 10)
+
+################################################################################################
+
+print("---------------------------------------------------------------------------")
+print("                      Word2Vec Glove                                       ")
+print("---------------------------------------------------------------------------")
+
+path = ' local_path = ''/Users/johannesgesk/Documents_MacIntouch/Philipps_Universität_Marburg/2023WS/Bachelor Arbeit/datasets/GloVe/glove.42B.300d.txt'
+
+print("---------------------------------------------------------------------------")
+print("                                RunTime                                    ")
+print("---------------------------------------------------------------------------")
+
+complete_time = time.time() - start_time
+print(complete_time)
+
+print("---------------------------------------------------------------------------")
+print("                                The End                                    ")
+print("---------------------------------------------------------------------------")
 
 '''
 #TestTheFunction
@@ -634,32 +970,3 @@ async def download_and_read_model(bucket_name, object_name):
 asyncio.run(main())
 
 '''
-
-print("---------------------------------------------------------------------------")
-print("                     Model loaded                                          ")
-print("---------------------------------------------------------------------------")
-
-
-
-
-
-print("---------------------------------------------------------------------------")
-print("                      Word2Vec Glove                                       ")
-print("---------------------------------------------------------------------------")
-
-
-path = ' local_path = ''/Users/johannesgesk/Documents_MacIntouch/Philipps_Universität_Marburg/2023WS/Bachelor Arbeit/datasets/GloVe/glove.42B.300d.txt'
-
-
-
-
-print("---------------------------------------------------------------------------")
-print("                                RunTime                                    ")
-print("---------------------------------------------------------------------------")
-
-complete_time = time.time() - start_time
-print(complete_time)
-
-print("---------------------------------------------------------------------------")
-print("                                The End                                    ")
-print("---------------------------------------------------------------------------")
