@@ -1,9 +1,11 @@
 import logging
 import re
 import ssl
+import string
 import time
 
 import aiohttp
+import nltk as nltk
 import numpy as np
 from minio import Minio
 from minio.error import S3Error
@@ -241,7 +243,8 @@ def lda_term_distribution(bucket_name, object_name, num_topics=1):
         stop_words='english',
         min_df=2,
         max_df=0.95,
-        token_pattern=r'\b[a-zA-Z]+\b'  # only words consisting entirely of letters
+        #token_pattern=r'\b[a-zA-Z]+\b'  # only words consisting entirely of letters
+        token_pattern = r'\b[a-zA-Z]{2,}\b'
     )
 
     # Create Document-term matrix
@@ -284,40 +287,22 @@ def lda_term_distribution(bucket_name, object_name, num_topics=1):
 #####################################################################################
 # Word2Vec
 #####################################################################################
-'''
-def embeddings_word2vec(keywords, weights, model):
-    if not isinstance(model, dict):
-        raise ValueError("Model must be a dictionary of word vectors.")
-    embeddings = []
-    weights_filtered = []
-    for keyword, weight in zip(keywords, weights):
-        if keyword in model:
-            embeddings.append(model[keyword])  # Retrieve the embedding
-            weights_filtered.append(weight)    # Append the corresponding weight
-            print(f"{keyword}: {model[keyword]}, weight: {weight}")
-        else:
-            print(f"Word not found in model: {keyword}")
-            embeddings.append(np.zeros(300))   # Append a zero vector if keyword not found
-            weights_filtered.append(weight)    # Still append the weight
-
-    return list(zip(embeddings, weights_filtered))
-'''
-
 
 def embeddings_word2vec(keywords, weights, model):
     if not isinstance(model, dict):
         raise ValueError("Model must be a dictionary of word vectors.")
-    print('rettung5', keywords)
+    #print('rettung5', keywords)
     embeddings = []
     weights_filtered = []
     i = 0
-    for word, weight in enumerate(keywords, weights):
-        i = i +1
-        print(f"Processing array {i + 1}/{len(keywords)}")
+    for word, weight in zip(keywords, weights):
+
+       # print(f"Processing array {i + 1}/{len(keywords)}")
+        i = i + 1
         if word in model:
                 embeddings.append(model[word])
-                weights_filtered.append(weights)
-                print('rettung7',word, model[word], weights)
+                weights_filtered.append(weight)
+                #print('rettung7',word, model[word], weight)
         #else:
             #   print(f"Word not found in model: {word}")
 
@@ -355,11 +340,41 @@ def print_topic_embeddings(topic_words, glove_model):
                 else:
                     print(f"  {word}: Embedding not found")
 
-
 ########################################################################################
 # lda_t
 ########################################################################################
-
+def preprocess_text(text):
+    # Separate concatenated words marked by capital letters
+    text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)
+    # Convert text to lowercase
+    text = text.lower()
+    # Remove URLs
+    text = re.sub(r'http\S+', '', text)
+    # Remove non-alphanumeric symbols
+    text = re.sub(r'[^\w]', ' ', text)
+    # Remove numbers
+    text = re.sub(r'[0-9]', '', text)
+    # Remove punctuation
+    text = text.translate(str.maketrans(string.punctuation, ' ' * len(string.punctuation)))
+    # Tokenize text
+    # split text into seperate words
+    words = text.split()
+    #tokens = nltk.word_tokenize(text)
+    # Remove stop words
+    #tokens = [token for token in tokens if token not in stop_words]
+    #split text
+    words = text.split()
+    # Lemmatize tokens
+    #tokens = [lemmatizer.lemmatize(w) for w in tokens]
+    # Remove words with length <= 2
+    words = [word for word in words if len(word) > 1]
+    #tokens = [word for word in tokens if len(word) > 2]
+    # Include only verbs, proper nouns, and nouns
+    include_features = ['VB', 'NNP', 'NN']
+    pos_tagged = nltk.pos_tag(words)
+    tokens = [word for word, pos in pos_tagged if pos in include_features]
+    # Join tokens into a single string
+    return ' '.join(tokens)
 
 def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
     # List all objects in the bucket that end with .csv
@@ -377,7 +392,7 @@ def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
 
             # Assume text data is in the first column
             texts = data.iloc[:, 0].astype(str).tolist()
-
+            #preprocess_text(texts)
             # Preprocess texts: convert to lowercase and strip spaces
             texts = [text.lower().strip() for text in texts if isinstance(text, str)]
 
@@ -388,6 +403,7 @@ def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
                 max_df=0.95,
                 token_pattern=r'(?u)\b[a-zA-Z]+\b'  # Only include alphabetic words
             )
+
 
             # Create a Document-Term Matrix (DTM)
             dtm = vectorizer.fit_transform(texts)
@@ -415,7 +431,7 @@ def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
         except Exception as e:
             print(f"Error processing {csvName}: {str(e)}")
 
-    return topic_words_and_weights
+        return topic_words_and_weights
 
 
 #####################################################################################
@@ -475,8 +491,8 @@ print("-------------------------------------------------------------------------
 print("                                Whole Bucket                               ")
 print("---------------------------------------------------------------------------")
 
-# wholebucketname = "commondatacrawl"
-wholebucketname = "bagofwordstest"
+wholebucketname = "commondatacrawl"
+#wholebucketname = "bagofwordstest"
 
 # all_words_weigths = lda_term_distribution_all_csvs(wholebucketname, num_topics) for glove shit
 
@@ -504,7 +520,7 @@ def calculateEmbeddings(all_keywords, all_weights, glove_model):
     # check format
     embeddings = np.array([i[0] for i in embedding_weight_pairs], dtype=object)
     new_weights = np.array([i[1] for i in embedding_weight_pairs], dtype=object)
-    print('rettung4', embeddings.shape)
+    #print('rettung4', embeddings.shape)
     return np.array(embeddings, dtype=float), np.array(new_weights, dtype=float)
 
 
@@ -513,7 +529,7 @@ def calculateEmbeddings(all_keywords, all_weights, glove_model):
 ##
 def calculateRepresentiveVector(all_keywords, all_weights):
     # Calculate embeddings and weights
-    print('rettung2', all_keywords)
+    #print('rettung2', all_keywords)
     all_embeddings, embeddings_weights = calculateEmbeddings(all_keywords, all_weights, glove_model)
 
     # Convert weights into a numpy array for broadcasting if not already
@@ -528,10 +544,15 @@ def calculateRepresentiveVector(all_keywords, all_weights):
     print("                                 WEIGHTS                                    ")
     print("---------------------------------------------------------------------------")
     # print(embeddings_weights)
-
+    #embeddings_weights = embeddings_weights.reshape(-1, 1)
     # Multiply each embedding by its corresponding weight
-    weighted_embeddings = np.multiply(all_embeddings, embeddings_weights[:, np.newaxis])
-    print('rettung6', weighted_embeddings)
+
+    #calculating weighted average
+    weighted_embeddings = np.average(all_embeddings, axis=0, weights=embeddings_weights)
+    #print('rettung6', weighted_embeddings.shape)
+    #print('rettung8', all_embeddings.shape)
+    #print('rettung9', embeddings_weights.shape)
+
     # print(weighted_embeddings)
 
     return weighted_embeddings
@@ -540,7 +561,7 @@ def calculateRepresentiveVectorForQuery(csvName, all_keywords, all_weights):
     all_representive_vectors_query_ = []
     csvNameStorage = {}
     representiveVector = calculateRepresentiveVector(all_keywords, all_weights)
-    print(f"Querydocument {csvName}: {representiveVector}")
+    #print(f"Querydocument {csvName}: {representiveVector}")
     all_representive_vectors_query_.append(representiveVector)
 
     # Store all_representive_vectors wihtin a 2D Matrix. Each row is a 300 dimensional vector
@@ -554,6 +575,7 @@ def calculateRepresentiveVectorForQuery(csvName, all_keywords, all_weights):
 def initializeLake(bucket_name):
     objects = client.list_objects(bucket_name, recursive=True)
     all_representive_vectors = []
+    keywords_list = {}
     csv_name_storage = {}
     i = 0
     for obj in objects:
@@ -561,25 +583,23 @@ def initializeLake(bucket_name):
         objName = obj.object_name
 
         # store the name into an array
-
         csv_name_storage[i] = objName
         i = i + 1
         # get the top k keywords of the csv file.
         new_keywords = new_lda_term_distribution_all_csv(bucket_name, objName, num_keywords)
-        all_keywords = [t[0] for t in new_keywords]
-        print('Rettung', all_keywords)
+        all_keyword = [t[0] for t in new_keywords]
         all_weights = [t[1] for t in new_keywords]
-        representiveVector = calculateRepresentiveVector(all_keywords, all_weights)
-        print(f"{objName}: {representiveVector}")
+        representiveVector = calculateRepresentiveVector(all_keyword, all_weights)
         all_representive_vectors.append(representiveVector)
+        keywords_list[i] = new_keywords
 
     # Store all_representive_vectors wihtin a 2D Matrix. Each row is a 300 dimensional vector
     all_representive_vectors_matrix = np.vstack(all_representive_vectors)
 
-    return all_representive_vectors_matrix, csv_name_storage
+    return all_representive_vectors_matrix, csv_name_storage, keywords_list
 
 
-all_calculated_representive_vectors, csv_file_names = initializeLake(wholebucketname)
+all_calculated_representive_vectors, all_calculated_csv_file_names, all_calculated_keywords_list = initializeLake(wholebucketname)
 
 
 #####################################################################################################################
@@ -664,7 +684,7 @@ def hash_value_of_vector(v, planes):
 
 
     hash_value = int(hash_value)
-    print('Hash value of vector', hash_value)
+    #print('Hash value of vector', hash_value)
     return hash_value
 
 
@@ -869,12 +889,13 @@ def searchQueryDocument(bucketName, csvName, num_keywords):
     nearest_neighbor_ids = approximate_knn(vec_csv_Name, vec_to_search, planes_l, k=3, num_universes_to_use=1)
 
     print(f"Nearest neighbors for document {csvName}")
+    print(f"Keywords searched for: {new_keywords}")
 
     #print("")
 
     for neighbor_id in nearest_neighbor_ids:
-        print(f"Nearest neighbor at document id {neighbor_id}")
-    # print(f"document contents: {[neighbor_id]}")
+        print(f"Nearest neighbor at document id {all_calculated_csv_file_names[neighbor_id]}")
+        print(f"document keywords: {all_calculated_keywords_list[neighbor_id]}")
 
 
 searchQueryDocument("commondatacrawl2", "22745259_0_4052170081208609462.csv", 10)
