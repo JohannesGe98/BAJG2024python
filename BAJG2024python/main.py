@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 import re
 import ssl
 import string
@@ -9,6 +11,7 @@ import nltk as nltk
 import numpy as np
 from minio import Minio
 from minio.error import S3Error
+from minio.commonconfig import CopySource
 import boto3
 from botocore.client import Config
 from numpy import matrix
@@ -76,7 +79,7 @@ def fetch_texts_from_minio(bucket_name):
 
 ####
 
-
+'''
 def keywords_lda(text, numKeywords=10):
     # Function to extract keywords from text using LDA
 
@@ -111,7 +114,7 @@ def keywords_lda(text, numKeywords=10):
 
     return topic_words_and_weights
 
-
+'''
 ####################################################################################
 #   MINO ASYNC
 ####################################################################################
@@ -378,10 +381,8 @@ def preprocess_text(text):
 
 def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
     # List all objects in the bucket that end with .csv
-    # objects = client.list_objects(bucket_name, recursive=True)
     all_topic_word_dists = []
-
-    # for obj in objects:
+    topic_words_and_weights = []
     if csvName.endswith('.csv'):
         try:
             # Fetch CSV file from the bucket
@@ -392,18 +393,17 @@ def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
 
             # Assume text data is in the first column
             texts = data.iloc[:, 0].astype(str).tolist()
-            #preprocess_text(texts)
+
             # Preprocess texts: convert to lowercase and strip spaces
             texts = [text.lower().strip() for text in texts if isinstance(text, str)]
 
             # Initialize CountVectorizer
             vectorizer = CountVectorizer(
                 stop_words='english',
-                min_df=2,
+                min_df=1,
                 max_df=0.95,
-                token_pattern=r'(?u)\b[a-zA-Z]+\b'  # Only include alphabetic words
+                token_pattern=r'\b[a-zA-Z]{2,}\b'  # Only include words with at least two alphabetic characters
             )
-
 
             # Create a Document-Term Matrix (DTM)
             dtm = vectorizer.fit_transform(texts)
@@ -423,15 +423,16 @@ def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
             # Normalize the weights
             total_weight = sum(top_weights)
             normalized_weights = [weight / total_weight for weight in top_weights]
-
+            #print("rettung1", top_words)
+            #print("rettung2", normalized_weights)
             # Combine top words with their normalized weights
             topic_words_and_weights = list(zip(top_words, normalized_weights))
             # all_topic_word_dists.append((csvName, topic_words_and_weights))
-
+            #print("rettung1", topic_words_and_weights)
         except Exception as e:
             print(f"Error processing {csvName}: {str(e)}")
 
-        return topic_words_and_weights
+    return topic_words_and_weights
 
 
 #####################################################################################
@@ -456,6 +457,7 @@ print("-------------------------------------------------------------------------
 print("                     Latent Dirichlent Allocation one word                 ")
 print("---------------------------------------------------------------------------")
 # Test the function
+'''
 bucketName = "bagofwordstest"
 fileName = "22745259_0_4052170081208609462.csv"
 testobject = client.get_object(bucketName, fileName)
@@ -465,12 +467,12 @@ file_content = testobject.read()
 ### printbefehl. normalerweuise nicht dabei
 # for word, weight in keywords_and_weights:
 #  print(f"{word}: {weight:.4f}")
-
+'''
 print("---------------------------------------------------------------------------")
 print("                                LDA current                                ")
 print("---------------------------------------------------------------------------")
 
-num_keywords = 10
+num_keywords = 20
 
 # words, topic_word_dist = lda_term_distribution("commondatacrawl","CC-MAIN-20150728002301-00000-ip-10-236-191-2.ec2.internal.json.csv", num_topics)
 # words, topic_word_dist = lda_term_distribution(file_content, num_topics)
@@ -491,7 +493,9 @@ print("-------------------------------------------------------------------------
 print("                                Whole Bucket                               ")
 print("---------------------------------------------------------------------------")
 
-wholebucketname = "commondatacrawl"
+wholebucketname = "commonwebtables"
+#wholebucketname = "commondatacrawl2"
+#wholebucketname = "commondatacrawl"
 #wholebucketname = "bagofwordstest"
 
 # all_words_weigths = lda_term_distribution_all_csvs(wholebucketname, num_topics) for glove shit
@@ -530,8 +534,15 @@ def calculateEmbeddings(all_keywords, all_weights, glove_model):
 def calculateRepresentiveVector(all_keywords, all_weights):
     # Calculate embeddings and weights
     #print('rettung2', all_keywords)
+
     all_embeddings, embeddings_weights = calculateEmbeddings(all_keywords, all_weights, glove_model)
 
+    # Check if input arrays are empty
+    if all_embeddings.size == 0 or embeddings_weights.size == 0:
+        print("Input arrays are empty, skipping computation.")
+        weighted_embeddings = np.zeros((1, 300))
+    else:
+        weighted_embeddings = np.average(all_embeddings, axis=0, weights=embeddings_weights)
     # Convert weights into a numpy array for broadcasting if not already
     #if not isinstance(embeddings_weights, np.ndarray):
      #   embeddings_weights = np.array(embeddings_weights, dtype=float)
@@ -548,7 +559,7 @@ def calculateRepresentiveVector(all_keywords, all_weights):
     # Multiply each embedding by its corresponding weight
 
     #calculating weighted average
-    weighted_embeddings = np.average(all_embeddings, axis=0, weights=embeddings_weights)
+   # weighted_embeddings = np.average(all_embeddings, axis=0, weights=embeddings_weights)
     #print('rettung6', weighted_embeddings.shape)
     #print('rettung8', all_embeddings.shape)
     #print('rettung9', embeddings_weights.shape)
@@ -570,6 +581,41 @@ def calculateRepresentiveVectorForQuery(csvName, all_keywords, all_weights):
     all_representive_vectors_matrix = np.vstack(all_representive_vectors_query_)
     csvNameStorage[0] = csvName
     return all_representive_vectors_matrix, csvNameStorage
+def serialize_representative_vector(vector):
+    if isinstance(vector, np.ndarray):
+        return vector.tolist()
+    elif isinstance(vector, tuple):
+        return [serialize_representative_vector(v) if isinstance(v, (np.ndarray, tuple)) else v for v in vector]
+    else:
+        raise ValueError("representative_vector must be either a NumPy array or a tuple")
+def update_meta_data_min_io(bucket_name, object_name, existing_metadata, vector_to_add):
+    try:
+
+        vector_serialized = serialize_representative_vector(vector_to_add)
+        vector_str = json.dumps(vector_serialized)
+        #vector_str = json.dumps(vector_to_add)
+        # meta data to add
+        new_metadata = {
+            "X-Amz-Meta-Vector": vector_str
+        }
+        # Existing user metadata
+        #existing_metadata = existing_metadata.metadata
+
+        # Update metadata
+        updated_metadata = {**existing_metadata, **new_metadata}
+        copy_source = CopySource(bucket_name, object_name)
+        # Copy object to the same location with new metadata
+        client.copy_object(
+            bucket_name,
+            object_name,
+            copy_source,
+            metadata=updated_metadata,
+            metadata_directive="REPLACE"
+        )
+
+        print(f"Metadata for object '{object_name}' updated successfully.")
+    except S3Error as e:
+        print(f"Error occurred: {e}")
 
 
 def initializeLake(bucket_name):
@@ -581,18 +627,50 @@ def initializeLake(bucket_name):
     for obj in objects:
         # get the Name of the current csv.file
         objName = obj.object_name
+        #get the meta data, check if the vector already exists in the metadata
+        object_stat = client.stat_object(bucket_name, objName)
 
         # store the name into an array
         csv_name_storage[i] = objName
-        i = i + 1
+
+        ##############################################################################################
+        metadata_key = "X-Amz-Meta-Vector"
+        '''
+        if metadata_key in object_stat.metadata:
+            representiveVector = object_stat.metadata[metadata_key]
+            print(f"Metadata key '{metadata_key}' is present.")
+            print(f"Metadata value: {representiveVector[-5:]}")
+            new_keywords = new_lda_term_distribution_all_csv(bucket_name, objName, num_keywords)
+        else:
+            # get the top k keywords of the csv file.
+            print(f"Metadata key '{metadata_key}' is not present. Calculating now")
+            new_keywords = new_lda_term_distribution_all_csv(bucket_name, objName, num_keywords)
+            all_keyword = [t[0] for t in new_keywords]
+            all_weights = [t[1] for t in new_keywords]
+            print("rettung")
+            print(objName)
+            print(all_keyword)
+            print(all_weights)
+            representiveVector = calculateRepresentiveVector(all_keyword, all_weights)
+            ####################
+            update_meta_data_min_io(bucket_name, objName, object_stat.metadata, representiveVector)
+        ##############################################################################################
+        '''
+
         # get the top k keywords of the csv file.
         new_keywords = new_lda_term_distribution_all_csv(bucket_name, objName, num_keywords)
         all_keyword = [t[0] for t in new_keywords]
         all_weights = [t[1] for t in new_keywords]
+        print("rettung")
+        print(objName)
+        print(all_keyword)
+        print(all_weights)
         representiveVector = calculateRepresentiveVector(all_keyword, all_weights)
+
+
         all_representive_vectors.append(representiveVector)
         keywords_list[i] = new_keywords
-
+        i = i + 1
     # Store all_representive_vectors wihtin a 2D Matrix. Each row is a 300 dimensional vector
     all_representive_vectors_matrix = np.vstack(all_representive_vectors)
 
@@ -644,8 +722,8 @@ print(print(f"shape of document_vecs {all_calculated_representive_vectors.shape}
 ########################################################################################################################################
 # Parameters
 N_DIMS = 300  # Dimension of your vectors
-num_hyperplanes = 2  # Number of hyperplanes (hash functions)
-num_repeat_process = 1
+num_hyperplanes = 10  # Number of hyperplanes (hash functions)
+num_repeat_process = 25
 
 planes_l = [np.random.normal(size=(N_DIMS, num_hyperplanes))
             for _ in range(num_repeat_process)]
@@ -760,11 +838,39 @@ print(f"The first 5 document indices stored at key 0 of are {tmp_id_table[0][0:5
 hash_tables = []
 id_tables = []
 for universe_id in range(num_repeat_process):  # there are 25 hashes
-    print('working on hash universe #:', universe_id)
+    #print('working on hash universe #:', universe_id)
     planes = planes_l[universe_id]
     hash_table, id_table = make_hash_table(all_calculated_representive_vectors, planes)
+
     hash_tables.append(hash_table)
     id_tables.append(id_table)
+
+    #############################################################################################
+    # R studio
+
+    # Initialize lists to store vectors and their corresponding IDs
+    all_vectors = []
+    all_ids = []
+
+    for key in hash_table:
+        vectors = hash_table[key]
+        ids = id_table[key]
+        all_vectors.extend(vectors)
+        all_ids.extend(ids)
+
+    # Convert list of vectors into a DataFrame
+    df_vectors = pd.DataFrame(all_vectors)
+
+    # Add IDs as a column to the DataFrame
+    df_vectors['ID'] = all_ids
+
+    # Save the DataFrame to a CSV file in the same directory as the script
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    csv_file_path = os.path.join(project_dir, 'hash_table_vectors_with_ids.csv')
+    df_vectors.to_csv(csv_file_path, index=False)
+
+    print(f"CSV file saved to {csv_file_path}")
+    #####################################################################################
 
 print("---------------------------------------------------------------------------")
 print("                     LSH                                                   ")
@@ -774,7 +880,6 @@ print("-------------------------------------------------------------------------
 #####################################################################################################################
 ##########################################create hypertables
 #####################################################################################################################
-
 # UNQ_C21 (UNIQUE CELL IDENTIFIER, DO NOT EDIT)
 # This is the code used to do the fast nearest neighbor search. Feel free to go over it
 # def approximate_knn(doc_id, v, planes_l, k=1, num_universes_to_use=num_repeat_process):
@@ -812,7 +917,7 @@ def approximate_knn(csvName, v, planes_l, k=1, num_universes_to_use=num_repeat_p
         # get the subset of documents to consider as nearest neighbors from this id_table dictionary
         new_ids_to_consider = id_table[hash_value]
 
-        ### START CODE HERE (REPLACE INSTANCES OF 'None' with your code) ###
+
 
 
         # remove the id of the document that we're searching
@@ -886,19 +991,19 @@ def searchQueryDocument(bucketName, csvName, num_keywords):
 
     #print(vec_to_search)
 
-    nearest_neighbor_ids = approximate_knn(vec_csv_Name, vec_to_search, planes_l, k=3, num_universes_to_use=1)
+    nearest_neighbor_ids = approximate_knn(vec_csv_Name, vec_to_search, planes_l, k=10, num_universes_to_use=1)
 
     print(f"Nearest neighbors for document {csvName}")
     print(f"Keywords searched for: {new_keywords}")
 
-    #print("")
+
 
     for neighbor_id in nearest_neighbor_ids:
         print(f"Nearest neighbor at document id {all_calculated_csv_file_names[neighbor_id]}")
         print(f"document keywords: {all_calculated_keywords_list[neighbor_id]}")
 
 
-searchQueryDocument("commondatacrawl2", "22745259_0_4052170081208609462.csv", 10)
+searchQueryDocument("query", "AccountdataforBSbigt0242000.csv", 20)
 
 ################################################################################################
 
