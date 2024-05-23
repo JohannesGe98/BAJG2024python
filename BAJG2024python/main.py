@@ -273,7 +273,7 @@ def lda_term_distribution(bucket_name, object_name, num_topics=1):
     # Representation of Words and Topic Word Distribution
     #####################################################################################
     # if __name__ == "__main__":
-    bucket_name = "commondatacrawl"
+    #bucket_name = "commondatacrawl"
     texts = fetch_texts_from_minio(bucket_name)
     if texts:
         num_topics = 5
@@ -379,6 +379,10 @@ def preprocess_text(text):
     # Join tokens into a single string
     return ' '.join(tokens)
 
+def split_text_into_chunks(text, chunk_size=100):
+    words = text.split()
+    return [' '.join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+
 def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
     # List all objects in the bucket that end with .csv
     all_topic_word_dists = []
@@ -391,12 +395,27 @@ def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
             print("Metadata:", stat.metadata)
             data = pd.read_csv(BytesIO(response.read()))
 
+            # Concatenate all text data from all columns
+            all_texts = data.apply(lambda x: ' '.join(x.dropna().astype(str)), axis=1).tolist()
+
+            # Preprocess texts: convert to lowercase and strip spaces
+            texts = [text.lower().strip() for text in all_texts if isinstance(text, str) and text.strip()]
+
+            if len(texts) == 1:
+                texts = split_text_into_chunks(texts[0])
+
+            # Check if there is valid text data
+            if len(texts) == 0:
+                print("No valid text data found.")
+                return topic_words_and_weights
+            '''
+            ######################################
             # Assume text data is in the first column
             texts = data.iloc[:, 0].astype(str).tolist()
 
             # Preprocess texts: convert to lowercase and strip spaces
             texts = [text.lower().strip() for text in texts if isinstance(text, str)]
-
+            '''
             # Initialize CountVectorizer
             vectorizer = CountVectorizer(
                 stop_words='english',
@@ -472,7 +491,7 @@ print("-------------------------------------------------------------------------
 print("                                LDA current                                ")
 print("---------------------------------------------------------------------------")
 
-num_keywords = 20
+num_keywords = 10
 
 # words, topic_word_dist = lda_term_distribution("commondatacrawl","CC-MAIN-20150728002301-00000-ip-10-236-191-2.ec2.internal.json.csv", num_topics)
 # words, topic_word_dist = lda_term_distribution(file_content, num_topics)
@@ -493,7 +512,10 @@ print("-------------------------------------------------------------------------
 print("                                Whole Bucket                               ")
 print("---------------------------------------------------------------------------")
 
-wholebucketname = "commonwebtables"
+wholebucketname = "trecsmall"
+#wholebucketname = "commonwebtables"
+#wholebucketname = "trectables"
+#wholebucketname = "commonwebtables"
 #wholebucketname = "commondatacrawl2"
 #wholebucketname = "commondatacrawl"
 #wholebucketname = "bagofwordstest"
@@ -504,7 +526,7 @@ wholebucketname = "commonwebtables"
 print(f"Now calculating on bucket: Bucket: {wholebucketname}")
 # print_lda_topics(all_embeddings, all_weights)
 glove_model = load_glove_model(
-    "/Users/johannesgesk/Documents_MacIntouch/Philipps_Universität_Marburg/2023WS/Bachelor Arbeit/datasets/GloVe/glove.42B.300d.txt")
+    "/Users/johannesgesk/Documents_MacIntouch/Philipps_Universität_Marburg/2023WS/Bachelor_Arbeit/datasets/GloVe/glove.42B.300d.txt")
 # create_embeddings(all_words_weigths,glove_model)
 print("---------------------------------------------------------------------------")
 print("                                 Word2Vec                                  ")
@@ -722,7 +744,7 @@ print(print(f"shape of document_vecs {all_calculated_representive_vectors.shape}
 ########################################################################################################################################
 # Parameters
 N_DIMS = 300  # Dimension of your vectors
-num_hyperplanes = 10  # Number of hyperplanes (hash functions)
+num_hyperplanes = 7  # Number of hyperplanes (hash functions)
 num_repeat_process = 25
 
 planes_l = [np.random.normal(size=(N_DIMS, num_hyperplanes))
@@ -795,6 +817,7 @@ def make_hash_table(vecs, planes):
     # number of buckets is 2^(number of planes)
     num_buckets = 2 ** num_of_planes
 
+    #num_buckets = 100
     # create the hash table as a dictionary.
     # Keys are integers (0,1,2.. number of buckets)
     # Values are empty lists
@@ -804,6 +827,11 @@ def make_hash_table(vecs, planes):
     # Keys are integers (0,1,2... number of buckets)
     # Values are empty lists
     id_table = {i: [] for i in range(num_buckets)}
+
+    # create the vector to hash table as a dictionary.
+    # Keys are vector indices
+    # Values are the hash values (bucket names)
+    vector_to_hash = {}
 
     # for each vector in 'vecs'
     for i, v in enumerate(vecs):
@@ -818,11 +846,15 @@ def make_hash_table(vecs, planes):
         # the key is the h, and the 'i' is appended to the list at key h
         id_table[h].append(i)
 
+        # store the hash value for the vector
+        #vector_to_hash[i] = h
+
+
+    #return hash_table, id_table, vector_to_hash
     return hash_table, id_table
 
-
 # You do not have to input any code in this cell, but it is relevant to grading, so please do not change anything
-
+'''
 np.random.seed(0)
 planes = planes_l[0]  # get one 'universe' of planes to test the function
 vec = np.random.rand(1, 300)
@@ -831,7 +863,7 @@ tmp_hash_table, tmp_id_table = make_hash_table(vec, planes)
 print(f"The hash table at key 0 has {len(tmp_hash_table[0])} document vectors")
 print(f"The id table at key 0 has {len(tmp_id_table[0])}")
 print(f"The first 5 document indices stored at key 0 of are {tmp_id_table[0][0:5]}")
-
+'''
 ######################################
 # create hash table
 # Creating the hashtables
@@ -840,37 +872,46 @@ id_tables = []
 for universe_id in range(num_repeat_process):  # there are 25 hashes
     #print('working on hash universe #:', universe_id)
     planes = planes_l[universe_id]
+    #hash_table, id_table, bucket_names_table = make_hash_table(all_calculated_representive_vectors, planes)
     hash_table, id_table = make_hash_table(all_calculated_representive_vectors, planes)
 
     hash_tables.append(hash_table)
     id_tables.append(id_table)
 
     #############################################################################################
-    # R studio
-
-    # Initialize lists to store vectors and their corresponding IDs
+    # R studio for the last universe
+    #if universe_id is (num_repeat_process):
+        # Initialize lists to store vectors and their corresponding IDs
     all_vectors = []
     all_ids = []
+    all_bucketnames= []
 
     for key in hash_table:
         vectors = hash_table[key]
         ids = id_table[key]
+        hash_bucket_names = ids
+        #hash_bucket_names = bucket_names_table
+
         all_vectors.extend(vectors)
         all_ids.extend(ids)
+        all_bucketnames.extend([hash_bucket_names] * len(vectors))
 
-    # Convert list of vectors into a DataFrame
+    #if universe_id is (num_repeat_process - 1):
+
+        # Convert list of vectors into a DataFrame
     df_vectors = pd.DataFrame(all_vectors)
 
-    # Add IDs as a column to the DataFrame
-    df_vectors['ID'] = all_ids
+        # Add IDs as a column to the DataFrame
+    df_vectors['hashbucket'] = all_bucketnames
 
-    # Save the DataFrame to a CSV file in the same directory as the script
+        # Save the DataFrame to a CSV file in the same directory as the script
     project_dir = os.path.dirname(os.path.abspath(__file__))
-    csv_file_path = os.path.join(project_dir, 'hash_table_vectors_with_ids.csv')
+        #time = time.time()
+    csv_file_path = os.path.join(project_dir, f"hash_table_vectors_with_ids_trecsmall.csv")
     df_vectors.to_csv(csv_file_path, index=False)
 
     print(f"CSV file saved to {csv_file_path}")
-    #####################################################################################
+        #####################################################################################
 
 print("---------------------------------------------------------------------------")
 print("                     LSH                                                   ")
@@ -1003,7 +1044,7 @@ def searchQueryDocument(bucketName, csvName, num_keywords):
         print(f"document keywords: {all_calculated_keywords_list[neighbor_id]}")
 
 
-searchQueryDocument("query", "AccountdataforBSbigt0242000.csv", 20)
+searchQueryDocument("trecquery", "'Star Wars' Story of Clone Wars Expands in 'Rebels'.csv", 10)
 
 ################################################################################################
 

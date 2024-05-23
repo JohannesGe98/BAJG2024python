@@ -225,7 +225,7 @@ def process_json_to_csv(bucket_name, target_bucket):
 # Usage
 
 if __name__ == "__main__":
-    process_json_to_csv("trex", "commonwebtables")
+    process_json_to_csv("1438042981856.5", "commonwebtables")
 
 print("Ende")
 

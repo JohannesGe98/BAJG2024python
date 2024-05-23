@@ -18,7 +18,7 @@ client = Minio(
 )
 
 
-def process_large_tsv_to_csv(bucket_name, target_bucket, max_csv_files=23000):
+def process_large_tsv_to_csv(bucket_name, target_bucket, max_csv_files=4000):
     logging.info("Listing objects in bucket: %s", bucket_name)
     objects = client.list_objects(bucket_name, recursive=True)
     csv_file_count = 0
@@ -86,6 +86,6 @@ def process_large_tsv_to_csv(bucket_name, target_bucket, max_csv_files=23000):
 
 # Usage
 if __name__ == "__main__":
-    process_large_tsv_to_csv("trec20000", "trectables")
+    process_large_tsv_to_csv("trec20000", "trecsmall")
 
 print("Ende")
