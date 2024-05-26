@@ -512,8 +512,9 @@ print("-------------------------------------------------------------------------
 print("                                Whole Bucket                               ")
 print("---------------------------------------------------------------------------")
 
-wholebucketname = "trecsmall"
-#wholebucketname = "commonwebtables"
+#wholebucketname = "trecsmall"
+wholebucketname = "commonwebtables"
+#wholebucketname = "commonwebcrawlerhuge"
 #wholebucketname = "trectables"
 #wholebucketname = "commonwebtables"
 #wholebucketname = "commondatacrawl2"
@@ -744,7 +745,7 @@ print(print(f"shape of document_vecs {all_calculated_representive_vectors.shape}
 ########################################################################################################################################
 # Parameters
 N_DIMS = 300  # Dimension of your vectors
-num_hyperplanes = 7  # Number of hyperplanes (hash functions)
+num_hyperplanes = 13  # Number of hyperplanes (hash functions)
 num_repeat_process = 25
 
 planes_l = [np.random.normal(size=(N_DIMS, num_hyperplanes))
