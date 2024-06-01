@@ -245,7 +245,7 @@ def lda_term_distribution(bucket_name, object_name, num_topics=1):
     # Initialize CountVectorizer with a custom token pattern to ensure only alphabetic words are considered
     vectorizer = CountVectorizer(
         stop_words='english',
-        min_df=1.5,
+        min_df=1.0,
         max_df=0.8,
         #token_pattern=r'\b[a-zA-Z]+\b'  # only words consisting entirely of letters
         token_pattern = r'\b[a-zA-Z]{2,}\b'
@@ -379,93 +379,6 @@ def preprocess_text(text):
     tokens = [word for word, pos in pos_tagged if pos in include_features]
     # Join tokens into a single string
     return ' '.join(tokens)
-'''
-def split_text_into_chunks(text, chunk_size=500):
-    """Split text into chunks of specified size."""
-    words = text.split()
-    return [' '.join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
-
-def preprocess_text(text):
-    """Preprocess the text by converting to lowercase and stripping extra spaces."""
-    return text.lower().strip()
-
-def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
-    # List all objects in the bucket that end with .csv
-    all_topic_word_dists = []
-    topic_words_and_weights = []
-    if csvName.endswith('.csv'):
-        try:
-            # Fetch CSV file from the bucket
-            response = client.get_object(bucket_name, csvName)
-            stat = client.stat_object(bucket_name, csvName)
-            print("Metadata:", stat.metadata)
-            data = pd.read_csv(BytesIO(response.read()))
-
-            # Concatenate all text data from all columns
-            all_texts = data.apply(lambda x: ' '.join(x.dropna().astype(str)), axis=1).tolist()
-
-            # Preprocess texts: convert to lowercase and strip spaces
-            texts = [text.lower().strip() for text in all_texts if isinstance(text, str) and text.strip()]
-
-            # Split long texts into chunks if necessary
-            chunked_texts = []
-            for text in texts:
-                if len(text.split()) > 500:  # Adjust chunk size as needed
-                    chunked_texts.extend(split_text_into_chunks(text))
-                else:
-                    chunked_texts.append(text)
-
-            texts = chunked_texts
-
-            # Check if there is valid text data
-            if len(texts) == 0:
-                print("No valid text data found.")
-                return topic_words_and_weights
-            
-            
-            # Initialize CountVectorizer
-            vectorizer = CountVectorizer(
-                stop_words='english',
-                min_df=0.1,
-                max_df=0.98,
-                token_pattern=r'\b[a-zA-Z]{2,}\b'  # Only include words with at least two alphabetic characters
-            )
-
-            # Create a Document-Term Matrix (DTM)
-            dtm = vectorizer.fit_transform(texts)
-
-            if dtm.shape[1] == 0:
-                print("DTM is empty. No valid terms found.")
-                return topic_words_and_weights
-
-            # Define and fit LDA model
-            num_topics = 1  # Identifying one topic since we're extracting k keywords
-            lda_model = LatentDirichletAllocation(n_components=num_topics)
-            lda_model.fit(dtm)
-
-            # Interpret the topic
-            feature_names = vectorizer.get_feature_names_out()
-            topic = lda_model.components_[0]
-            top_words_indices = topic.argsort()[:-numKeywords - 1:-1]
-            top_words = [feature_names[i] for i in top_words_indices]
-            top_weights = [topic[i] for i in top_words_indices]
-
-            # Normalize the weights
-            total_weight = sum(top_weights)
-            normalized_weights = [weight / total_weight for weight in top_weights]
-            #print("rettung1", top_words)
-            #print("rettung2", normalized_weights)
-            # Combine top words with their normalized weights
-            topic_words_and_weights = list(zip(top_words, normalized_weights))
-            # all_topic_word_dists.append((csvName, topic_words_and_weights))
-            #print("rettung1", topic_words_and_weights)
-        except Exception as e:
-            print(f"Error processing {csvName}: {str(e)}")
-
-    return topic_words_and_weights
-'''
-
-
 
 
 def extract_keywords_lda(dtm, vectorizer, num_keywords, num_topics=1):
@@ -560,8 +473,8 @@ def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
             # Initialize CountVectorizer
             vectorizer = CountVectorizer(
                 stop_words='english',
-                min_df=1,
-                max_df=0.92,
+                min_df=0.01,
+                max_df=0.4,
                 token_pattern=r'\b[a-zA-Z]{2,}\b'  # Only include words with at least two alphabetic characters
             )
 
@@ -635,7 +548,7 @@ print("-------------------------------------------------------------------------
 print("                                LDA current                                ")
 print("---------------------------------------------------------------------------")
 
-num_keywords = 9
+num_keywords = 10
 
 # words, topic_word_dist = lda_term_distribution("commondatacrawl","CC-MAIN-20150728002301-00000-ip-10-236-191-2.ec2.internal.json.csv", num_topics)
 # words, topic_word_dist = lda_term_distribution(file_content, num_topics)
@@ -817,7 +730,7 @@ def update_meta_data_min_io(bucket_name, object_name, existing_metadata, vector_
 
 
 def initializeLake(bucket_name):
-    result_file = 'LDA_vectors10.csv'
+    result_file = 'trectables_keywords_10_mindf_0.01_max_0.4_.csv'
     # Check if the result file exists
     if os.path.exists(result_file):
         print(f"Result file {result_file} already exists. Reading result from the file.")
@@ -856,18 +769,26 @@ def initializeLake(bucket_name):
         all_weights = [t[1] for t in new_keywords]
         representiveVector = calculateRepresentiveVector(all_keyword, all_weights)
         result_row = []
-        all_representive_vectors.append(representiveVector)
+        #all_representive_vectors.append(representiveVector)
         keywords_list[i] = new_keywords
         i = i + 1
+
+        empty_vector = np.zeros((1, 300))
+        if np.all(representiveVector == 0.0):
+            print("FEhler")
+            continue
         if not all_keyword:
             print("schau")
             continue
         # Store the results for saving to the file
         else:
             result_row = representiveVector.tolist()
+
         result_row.append(objName)
         result_row.append(str(new_keywords))
         results.append(result_row)
+
+        all_representive_vectors.append(representiveVector)
 
     # Store all_representive_vectors within a 2D Matrix. Each row is a 300 dimensional vector
     all_representive_vectors_matrix = np.vstack(all_representive_vectors)
@@ -926,15 +847,14 @@ print(print(f"shape of document_vecs {all_calculated_representive_vectors.shape}
 ########################################################################################################################################
 # Parameters
 N_DIMS = 300  # Dimension of your vectors
-num_hyperplanes = 25  # Number of hyperplanes
-num_repeat_process = 25
-num_buckets = min(8196, 2 ** num_hyperplanes)
+num_hyperplanes = 30  # Number of hyperplanes
+num_repeat_process = 30
+num_buckets = min(32768, 2 ** num_hyperplanes)
 
 planes_l = [np.random.normal(size=(N_DIMS, num_hyperplanes))
             for _ in range(num_repeat_process)]
 
 print(len(planes_l))  # 25 ways to devide the space
-print(len(planes_l[0]))  # 300 dimensional space
 print(len(planes_l[0][0]))  # 10 planes in each space
 
 '''
@@ -1133,7 +1053,7 @@ for universe_id in range(num_repeat_process):  # there are 25 hashes
     project_dir = os.path.dirname(os.path.abspath(__file__))
         #time = time.time()
     if universe_id == 24:
-        csv_file_path = os.path.join(project_dir, f"hash_table_vectors_with_ids_trecsmall.csv")
+        csv_file_path = os.path.join(project_dir, f"hash_table_vectors_with_ids_bucket_{wholebucketname}_num_buckets_{num_buckets}_num_hyperplanes_{num_hyperplanes}.csv")
         df_vectors.to_csv(csv_file_path, index=False)
 
         print(f"CSV file saved to {csv_file_path}")
@@ -1272,7 +1192,10 @@ def searchQueryDocument(bucketName, csvName, num_keywords):
 
 
 
-searchQueryDocument("trecquery", "'Star Wars' Story of Clone Wars Expands in 'Rebels'.csv", 9)
+searchQueryDocument("trecquery", "JK Rowling Reveals Why Harry Potter Named His Son After Professor Snape.csv", 10)
+#searchQueryDocument("querycommonwebtableshuge", "1946FootballTeam--UniversityofMichiganAthletics.csv", 9)
+#searchQueryDocument("querycommonwebtableshuge", "PilotCountryAirportBrooksvilleFLX05FlightAware.csv+", 10)
+
 
 ################################################################################################
 
