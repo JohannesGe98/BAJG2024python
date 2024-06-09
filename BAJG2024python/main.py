@@ -18,7 +18,7 @@ from botocore.client import Config
 from numpy import matrix
 from sklearn.metrics.pairwise import cosine_similarity
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+#logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # LDA
 
@@ -168,7 +168,7 @@ def lda_term_distribution_all_csvs(bucket_name, num_topics=1):
                 vectorizer = CountVectorizer(
                     stop_words='english',
                     min_df=0.001,
-                    max_df=0.94,
+                    max_df=0.91,
                     token_pattern=r'(?u)\b[a-zA-Z]+\b'  # Filter all non alphabetic words out
                 )
 
@@ -474,7 +474,7 @@ def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
             vectorizer = CountVectorizer(
                 stop_words='english',
                 min_df=0.01,
-                max_df=0.4,
+                max_df=0.89,
                 token_pattern=r'\b[a-zA-Z]{2,}\b'  # Only include words with at least two alphabetic characters
             )
 
@@ -571,8 +571,8 @@ print("-------------------------------------------------------------------------
 
 #wholebucketname = "trecsmall"
 #wholebucketname = "commonwebtables"
-#wholebucketname = "commonwebcrawlerhuge"
-wholebucketname = "trectables"
+wholebucketname = "commonwebcrawlerhuge"
+#wholebucketname = "trectables"
 #wholebucketname = "trecsmall"
 #wholebucketname = "commonwebtables"
 #wholebucketname = "commondatacrawl2"
@@ -590,6 +590,7 @@ glove_model = load_glove_model(
 print("---------------------------------------------------------------------------")
 print("                                 Word2Vec                                  ")
 print("---------------------------------------------------------------------------")
+starttime_overall = time.time()
 
 
 # Print out the types and shapes/values of i[0] and i[1]
@@ -618,7 +619,7 @@ def calculateRepresentiveVector(all_keywords, all_weights):
 
     all_embeddings, embeddings_weights = calculateEmbeddings(all_keywords, all_weights, glove_model)
 
-
+    '''   '''
     #weighted average of vectors
     # Check if input arrays are empty
     if all_embeddings.size == 0 or embeddings_weights.size == 0:
@@ -637,18 +638,22 @@ def calculateRepresentiveVector(all_keywords, all_weights):
         weighted_embeddings = np.zeros((1, 300))  # Assuming embeddings are 300-dimensional for this example
         return weighted_embeddings
     else:
+        ##old   
+        
         # Calculate weighted sum of embeddings
         weighted_embeddings = np.dot(embeddings_weights, all_embeddings)
-
         norm = np.linalg.norm(weighted_embeddings)
         if norm == 0:
             print("Norm is zero, returning original weighted sum.")
             return weighted_embeddings
-
+        
     weighted_embeddings = weighted_embeddings / norm
-    '''
+   
+        embeddings_weights = embeddings_weights / (embeddings_weights.sum())
+        weighted_embeddings = np.sum(all_embeddings.T * embeddings_weights, axis=1)
+
     #weighted sum
-    '''
+    
     # Check if input arrays are empty
     if all_embeddings.size == 0 or embeddings_weights.size == 0:
         print("Input arrays are empty, skipping computation.")
@@ -657,8 +662,9 @@ def calculateRepresentiveVector(all_keywords, all_weights):
     else:
         # Calculate weighted sum of embeddings
         weighted_embeddings = np.dot(embeddings_weights, all_embeddings)
-    
+        '''
     '''
+
 
     # Ensure embeddings are numpy arrays and read y for multiplication
     #if isinstance(all_embeddings[0], list):  # Assuming embeddings are lists, not numpy arrays
@@ -667,7 +673,7 @@ def calculateRepresentiveVector(all_keywords, all_weights):
     print("---------------------------------------------------------------------------")
     print("                                 WEIGHTS                                    ")
     print("---------------------------------------------------------------------------")
-
+    '''
 
     #calculating weighted average
    # weighted_embeddings = np.average(all_embeddings, axis=0, weights=embeddings_weights)
@@ -682,6 +688,7 @@ def calculateRepresentiveVector(all_keywords, all_weights):
 def calculateRepresentiveVectorForQuery(csvName, all_keywords, all_weights):
     all_representive_vectors_query_ = []
     csvNameStorage = {}
+
     representiveVector = calculateRepresentiveVector(all_keywords, all_weights)
     #print(f"Querydocument {csvName}: {representiveVector}")
     all_representive_vectors_query_.append(representiveVector)
@@ -730,7 +737,7 @@ def update_meta_data_min_io(bucket_name, object_name, existing_metadata, vector_
 
 
 def initializeLake(bucket_name):
-    result_file = 'trectables_keywords_10_mindf_0.01_max_0.4_.csv'
+    result_file = 'commonwebcrawlhuge_mindf_0.01_max_0.91_keywords_10.csv'
     # Check if the result file exists
     if os.path.exists(result_file):
         print(f"Result file {result_file} already exists. Reading result from the file.")
@@ -847,48 +854,16 @@ print(print(f"shape of document_vecs {all_calculated_representive_vectors.shape}
 ########################################################################################################################################
 # Parameters
 N_DIMS = 300  # Dimension of your vectors
-num_hyperplanes = 30  # Number of hyperplanes
-num_repeat_process = 30
-num_buckets = min(32768, 2 ** num_hyperplanes)
+num_hyperplanes = 10 # Number of hyperplanes
+num_repeat_process = 15
+####  if smaller bucket is selected then 2 ** num_hyperplanes, it still needs to be 2** k, 1024, 20248, 4096, 8192, 16384...
+num_buckets = min(5000000000, 2 ** num_hyperplanes)
 
 planes_l = [np.random.normal(size=(N_DIMS, num_hyperplanes))
             for _ in range(num_repeat_process)]
 
 print(len(planes_l))  # 25 ways to devide the space
 print(len(planes_l[0][0]))  # 10 planes in each space
-
-'''
-def hash_value_of_vector(v, planes):
-    dot_product = np.dot(v, planes)  # This caluclates the positoin of the vector for each n dimensional line
-
-    # get the sign of the dot product (1,10) shaped vector
-    sign_of_dot_product = np.sign(dot_product)
-
-    # set h to be false (eqivalent to 0 when used in operations) if the sign is negative,
-    # and true (equivalent to 1) if the sign is positive (1,10) shaped vector
-    h = sign_of_dot_product >= 0
-
-    # remove extra un-used dimensions (convert this from a 2D to a 1D array)
-    h = np.squeeze(h)
-
-    # initialize the hash value to 0
-    hash_value = 0
-
-    n_planes = planes.shape[1]
-    for i in range(n_planes):
-        # increment the hash value by 2^i * h_i
-        hash_value += np.power(2, i) * h[i]
-
-    # cast hash_value as an integer
-
-
-    hash_value = int(hash_value)
-    #print('Hash value of vector', hash_value)
-    hilfe = ''.join(['1' if x > 0 else '0' for x in dot_product.tolist()])
-    return hilfe
-
-    #return hash_value
-    '''
 
 
 def hash_value_of_vector(v, planes, num_buckets):
@@ -990,19 +965,6 @@ def make_hash_table(vecs, planes, num_buckets):
 
         # store the hash value for the vector
         #vector_to_hash[i] = h
-    '''
-    hash_table = {}
-    id_table = {}
-
-    for i, v in enumerate(vecs):
-        h = hash_value_of_vector(v, planes)
-        if h not in hash_table:
-            hash_table[h] = []
-            id_table[h] = []
-        hash_table[h].append(v)
-        id_table[h].append(i)
-    #return hash_table, id_table, vector_to_hash
-    '''
     return hash_table, id_table
 
 ######################################
@@ -1104,9 +1066,6 @@ def approximate_knn(csvName, v, planes_l, k=1, num_universes_to_use=num_repeat_p
         # get the subset of documents to consider as nearest neighbors from this id_table dictionary
         new_ids_to_consider = id_table[hash_value]
 
-
-
-
         # remove the id of the document that we're searching
         if csvName in new_ids_to_consider:
             new_ids_to_consider.remove(csvName)
@@ -1178,7 +1137,7 @@ def searchQueryDocument(bucketName, csvName, num_keywords):
 
     #print(vec_to_search)
 
-    nearest_neighbor_ids = approximate_knn(vec_csv_Name, vec_to_search, planes_l, k=30, num_universes_to_use=1)
+    nearest_neighbor_ids = approximate_knn(vec_csv_Name, vec_to_search, planes_l, k=31, num_universes_to_use=1)
 
     print(f"Nearest neighbors for document {csvName}")
     print(f"Keywords searched for: {new_keywords}")
@@ -1192,9 +1151,12 @@ def searchQueryDocument(bucketName, csvName, num_keywords):
 
 
 
-searchQueryDocument("trecquery", "JK Rowling Reveals Why Harry Potter Named His Son After Professor Snape.csv", 10)
-#searchQueryDocument("querycommonwebtableshuge", "1946FootballTeam--UniversityofMichiganAthletics.csv", 9)
+#searchQueryDocument("trecquery", "JK Rowling Reveals Why Harry Potter Named His Son After Professor Snape.csv", 10)
+searchQueryDocument("querycommonwebtableshuge", "1946FootballTeam--UniversityofMichiganAthletics.csv", 10)
 #searchQueryDocument("querycommonwebtableshuge", "PilotCountryAirportBrooksvilleFLX05FlightAware.csv+", 10)
+#searchQueryDocument("querycommonwebtableshuge", "2015PorscheMacanSSUVRatingsPricesTrimsSummaryJDPower.csv", 10)
+
+
 
 
 ################################################################################################
@@ -1218,76 +1180,3 @@ print(f"Time for query {complete_querytime}")
 print("---------------------------------------------------------------------------")
 print("                                The End                                    ")
 print("---------------------------------------------------------------------------")
-
-'''
-#TestTheFunction
-bucketName = "modelbucket"
-fileName = "glove.42B.300d.txt"
-
-async def download_and_read_model(bucket_name, object_name):
-    url = client.presigned_get_object(bucket_name, object_name)
-    model = {}
-
-    # Setting up an HTTP session
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            if response.status == 200:
-                print(f"Response status: {response.status} OK")
-                # Reading the response content as text
-                text = await response.text()
-                lines = text.strip().split('\n')
-                for line in lines:
-                    parts = line.split()
-                    if len(parts) > 1:
-                        word = parts[0]
-                        try:
-                            # Ensure that vector parts can be converted to floats
-                            vector = list(map(float, parts[1:]))
-                            model[word] = vector
-                        except ValueError:
-                            print(f"Skipping line due to error converting to float: {line}")
-                            continue
-            else:
-                print(f"Failed to download the model, status code: {response.status}")
-                return None
-    return model
-
-
-#async def main():
-    local_path = '/Users/johannesgesk/Documents_MacIntouch/Philipps_Universität_Marburg/2023WS/Bachelor Arbeit/datasets/GloVe/glove.42B.300d.txt'
-    model_data = None
-
-    # Check if the model exists locally
-    if os.path.exists(local_path):
-        # Load local model data
-        print("Local use")
-        with open(local_path, 'r', encoding='utf-8') as file:
-            model_data = file.read()
-            print(model_data[:500])  # Print the first 500 characters of the model data
-            #################
-
-            ###########
-    else:
-        print("Download started")
-        # Download and read model data if not available locally
-        bucketName = "modelbucket"
-        fileName = "glove.42B.300d.txt"
-        model_data = await download_and_read_model(bucketName, fileName)
-        if model_data:
-            print(model_data[:500])  # Print the first 500 characters of the model data
-        else:
-            print("Failed to retrieve the model.")
-
-    if model_data:
-        print("Now working on vector calculation")
-        #keyword_embeddings = embeddings_word2vec(all_words, all_topic_word_dists, model_data)
-        #print(keyword_embeddings)
-        test_words = ['king', 'queen', 'man', 'woman']
-        for word in test_words:
-            if word in model_data:
-                print(f"Vector for '{word}':", model_data[word][:5])  # Show first 5 elements of vector
-            else:
-                print(f"Word '{word}' not found in model.")
-asyncio.run(main())
-
-'''
