@@ -168,7 +168,7 @@ def rank_embeddings(input_table_text, data_lake, keywordExtractionMethod, embedd
     bucket_name_data_lake = data_lake
     table_text = client.list_objects(bucket_name_data_lake, recursive=True)
     numTables = sum(1 for _ in table_text)
-    bucket_name_query = "querycommonwebtableshuge"
+    bucket_name_query = "trecquery"
     response = client.get_object(bucket_name_query, input_table_text)
     data = pd.read_csv(BytesIO(response.read()))
     all_texts = data.apply(lambda x: ' '.join(x.dropna().astype(str)), axis=1).tolist()
@@ -205,10 +205,10 @@ def rank_embeddings(input_table_text, data_lake, keywordExtractionMethod, embedd
 
     return ranked_tables_filtered
 
-input_table_text = "1946FootballTeam--UniversityofMichiganAthletics.csv"
+input_table_text = "California Sea Lion.csv"
 keywordExtractionMethod = 'lda'
 embeddingsMethod = 'word2vec'
-data_lake = "querycommonwebtableshuge"
+data_lake = "trectables"
 
 ######################################################################################################################################################
                                                         #call for similarity

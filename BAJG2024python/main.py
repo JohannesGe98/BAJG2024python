@@ -80,42 +80,6 @@ def fetch_texts_from_minio(bucket_name):
 
 ####
 
-'''
-def keywords_lda(text, numKeywords=10):
-    # Function to extract keywords from text using LDA
-
-    # Document-Term Matrix
-    vectorizer = CountVectorizer()
-    dtm = vectorizer.fit_transform([text])
-
-    # LDA
-    num_topics = 1  # Number of topics to identify
-    lda_model = LatentDirichletAllocation(n_components=num_topics)
-    lda_model.fit(dtm)
-
-    # Interpret the topic
-    feature_names = vectorizer.get_feature_names_out()
-    topic = lda_model.components_[0]
-    top_words_indices = topic.argsort()[:-numKeywords - 1:-1]
-    top_words = [feature_names[i] for i in top_words_indices]
-    top_weights = [topic[i] for i in top_words_indices]
-
-    # Normalize the weights        ------------------------------------------------ Try without normalizing. These weights represent the importance on the overall table, not only with respect to the other keywords  --------------------------------------
-    total_weight = sum(top_weights)
-    normalized_weights = [weight / total_weight for weight in top_weights]
-
-    # Store the top words and normalized weights in variables
-    ### original
-    topic_words_and_weights = list(zip(top_words, normalized_weights))
-    ###
-    topic_words_and_weights = [
-        (f"{index + 1}: {word}", weight)
-        for index, (word, weight) in enumerate(zip(top_words, normalized_weights))
-    ]
-
-    return topic_words_and_weights
-
-'''
 ####################################################################################
 #   MINO ASYNC
 ####################################################################################
@@ -145,61 +109,6 @@ from sklearn.decomposition import LatentDirichletAllocation
 from sklearn.feature_extraction.text import CountVectorizer
 from io import BytesIO
 
-'''
-def lda_term_distribution_all_csvs(bucket_name, num_topics=1):
-    # List all objects in the bucket that end with .csv
-    objects = client.list_objects(bucket_name, recursive=True)
-    topic_words = {}
-
-    for obj in objects:
-        if obj.object_name.endswith('.csv'):
-            try:
-                # Fetch CSV file from MinIO
-                response = client.get_object(bucket_name, obj.object_name)
-                data = pd.read_csv(BytesIO(response.read()))
-
-                # Assume text data is in a specific column, here using the first column for example
-                texts = data.iloc[:, 0].astype(str).tolist()
-
-                # Preprocess texts
-                texts = [text.lower().strip() for text in texts if isinstance(text, str)]
-
-                # Initialize CountVectorizer with token pattern to exclude numbers
-                vectorizer = CountVectorizer(
-                    stop_words='english',
-                    min_df=0.001,
-                    max_df=0.91,
-                    token_pattern=r'(?u)\b[a-zA-Z]+\b'  # Filter all non alphabetic words out
-                )
-
-                # Create Document-term matrix
-                dtm = vectorizer.fit_transform(texts)
-
-                # Initialize and fit LDA model
-                lda_model = LatentDirichletAllocation(n_components=num_topics, random_state=0, max_iter=10,
-                                                      learning_method='online')
-                lda_model.fit(dtm)
-
-                # Extract the words and topic-word distributions, normalize distributions
-                words = vectorizer.get_feature_names_out()
-                topic_word_distribution = lda_model.components_
-                topic_word_distribution /= topic_word_distribution.sum(axis=1)[:, None]  # Normalize
-
-                # Store the words with their respective weights per topic
-                file_topics = []
-                for topic_dist in topic_word_distribution:
-                    topic = {word: weight for word, weight in zip(words, topic_dist)}
-                    file_topics.append(topic)
-
-                # Map file name to its topics
-                topic_words[obj.object_name] = file_topics
-
-            except Exception as e:
-                print(f"Error processing file {obj.object_name}: {e}")
-
-    return topic_words
-'''
-
 #########################################################################################
 # print of all_csv_topics
 #########################################################################################
@@ -216,76 +125,6 @@ def print_lda_topics(all_words, all_topic_word_dists):
                 print(f"{words[word_idx]}: {topic_dist[word_idx]:.4f}")
             print(f"---------------------------------------------------------------------------")
 
-
-#########################################################################################
-# for just one file within the bucket
-
-
-def lda_term_distribution(bucket_name, object_name, num_topics=1):
-    # Fetch CSV file from MinIO
-    try:
-        response = client.get_object(bucket_name, object_name)
-        data = pd.read_csv(BytesIO(response.read()))
-    except Exception as e:
-        print(f"Error fetching or reading file {object_name}: {e}")
-        return None
-
-    # Assume text data is in a specific column, here using the first column for example
-    texts = data.iloc[:, 0].astype(str).tolist()
-
-    # Enhanced Preprocessing to remove numbers and strip whitespace, convert to lower case
-    def preprocess(text):
-        # Remove numbers and any non-alphabetic characters
-        text = re.sub(r'[^a-zA-Z\s]', '', text)
-        # Convert to lower case and strip whitespace
-        return text.lower().strip()
-
-    texts = [preprocess(text) for text in texts]
-
-    # Initialize CountVectorizer with a custom token pattern to ensure only alphabetic words are considered
-    vectorizer = CountVectorizer(
-        stop_words='english',
-        min_df=1.0,
-        max_df=0.8,
-        #token_pattern=r'\b[a-zA-Z]+\b'  # only words consisting entirely of letters
-        token_pattern = r'\b[a-zA-Z]{2,}\b'
-    )
-
-    # Create Document-term matrix
-    try:
-        dtm = vectorizer.fit_transform(texts)
-    except ValueError:
-        print("Empty vocabulary; perhaps the 'min_df' and 'max_df' settings filtered out all words.")
-        return None
-
-    # Initialize and fit LDA model
-    lda_model = LatentDirichletAllocation(n_components=num_topics, random_state=0, max_iter=10,
-                                          learning_method='online')
-    lda_model.fit(dtm)
-
-    # Extract the words and topic-word distributions, normalize distributions
-    words = vectorizer.get_feature_names_out()
-    topic_word_distribution = lda_model.components_
-    topic_word_distribution /= topic_word_distribution.sum(axis=1)[:, None]  # Normalize
-
-    return words, topic_word_distribution
-
-    #####################################################################################
-    # Representation of Words and Topic Word Distribution
-    #####################################################################################
-    # if __name__ == "__main__":
-    #bucket_name = "commondatacrawl"
-    texts = fetch_texts_from_minio(bucket_name)
-    if texts:
-        num_topics = 5
-        result = lda_term_distribution(texts, num_topics)
-        if result:
-            words, topic_word_distribution = result
-            print("Words and Topic Word Distribution:", words, topic_word_distribution)
-        else:
-            print("LDA processing failed due to insufficient data.")
-    else:
-        print("No text data found or error in fetching data.")
 
 
 #####################################################################################
@@ -328,11 +167,7 @@ def load_glove_model(file_path):
     return embeddings_index
 
 
-# Assuming an existing function that fetches top topic words for each document
-# Example function signature: get_topic_words_for_documents()
-# This function needs to be implemented according to how you retrieve topics from LDA
 
-# Function to print embeddings for each topic word of each file
 def print_topic_embeddings(topic_words, glove_model):
     for file, topics in topic_words.items():
         print(f"File: {file}")
@@ -382,7 +217,7 @@ def preprocess_text(text):
 
 
 def extract_keywords_lda(dtm, vectorizer, num_keywords, num_topics=1):
-    """Extract keywords using LDA."""
+
     lda_model = LatentDirichletAllocation(n_components=num_topics, random_state=42)
     lda_model.fit(dtm)
 
@@ -398,10 +233,6 @@ def extract_keywords_lda(dtm, vectorizer, num_keywords, num_topics=1):
         topics.append(list(zip(top_words, normalized_weights)))
 
     return topics
-
-
-
-
 
 def extract_keywords_lda(dtm, vectorizer, num_keywords, num_topics=1):
     """Extract keywords using LDA."""
@@ -473,8 +304,8 @@ def new_lda_term_distribution_all_csv(bucket_name, csvName, numKeywords):
             # Initialize CountVectorizer
             vectorizer = CountVectorizer(
                 stop_words='english',
-                min_df=0.01,
-                max_df=0.89,
+                min_df=0.1,
+                max_df=1,
                 token_pattern=r'\b[a-zA-Z]{2,}\b'  # Only include words with at least two alphabetic characters
             )
 
@@ -571,8 +402,8 @@ print("-------------------------------------------------------------------------
 
 #wholebucketname = "trecsmall"
 #wholebucketname = "commonwebtables"
-wholebucketname = "commonwebcrawlerhuge"
-#wholebucketname = "trectables"
+#wholebucketname = "commonwebcrawlerhuge"
+wholebucketname = "trectables"
 #wholebucketname = "trecsmall"
 #wholebucketname = "commonwebtables"
 #wholebucketname = "commondatacrawl2"
@@ -630,50 +461,7 @@ def calculateRepresentiveVector(all_keywords, all_weights):
         #embeddings_weights /= embeddings_weights.sum()
         weighted_embeddings = np.average(all_embeddings, axis=0, weights=embeddings_weights)
 
-    '''
-    #normalized weighted sum
-    # Check if input arrays are empty
-    if all_embeddings.size == 0 or embeddings_weights.size == 0:
-        print("Input arrays are empty, skipping computation.")
-        weighted_embeddings = np.zeros((1, 300))  # Assuming embeddings are 300-dimensional for this example
-        return weighted_embeddings
-    else:
-        ##old   
-        
-        # Calculate weighted sum of embeddings
-        weighted_embeddings = np.dot(embeddings_weights, all_embeddings)
-        norm = np.linalg.norm(weighted_embeddings)
-        if norm == 0:
-            print("Norm is zero, returning original weighted sum.")
-            return weighted_embeddings
-        
-    weighted_embeddings = weighted_embeddings / norm
-   
-        embeddings_weights = embeddings_weights / (embeddings_weights.sum())
-        weighted_embeddings = np.sum(all_embeddings.T * embeddings_weights, axis=1)
 
-    #weighted sum
-    
-    # Check if input arrays are empty
-    if all_embeddings.size == 0 or embeddings_weights.size == 0:
-        print("Input arrays are empty, skipping computation.")
-        weighted_embeddings = np.zeros((1, 300))  # Assuming embeddings are 300-dimensional for this example
-        return weighted_embeddings
-    else:
-        # Calculate weighted sum of embeddings
-        weighted_embeddings = np.dot(embeddings_weights, all_embeddings)
-        '''
-    '''
-
-
-    # Ensure embeddings are numpy arrays and read y for multiplication
-    #if isinstance(all_embeddings[0], list):  # Assuming embeddings are lists, not numpy arrays
-     #   all_embeddings = np.array(all_embeddings, dtype=float)
-
-    print("---------------------------------------------------------------------------")
-    print("                                 WEIGHTS                                    ")
-    print("---------------------------------------------------------------------------")
-    '''
 
     #calculating weighted average
    # weighted_embeddings = np.average(all_embeddings, axis=0, weights=embeddings_weights)
@@ -737,7 +525,7 @@ def update_meta_data_min_io(bucket_name, object_name, existing_metadata, vector_
 
 
 def initializeLake(bucket_name):
-    result_file = 'commonwebcrawlhuge_mindf_0.01_max_0.91_keywords_10.csv'
+    result_file = 'trectables_keywords_10_mindf_0.1_max_1_.csv'
     # Check if the result file exists
     if os.path.exists(result_file):
         print(f"Result file {result_file} already exists. Reading result from the file.")
@@ -854,10 +642,10 @@ print(print(f"shape of document_vecs {all_calculated_representive_vectors.shape}
 ########################################################################################################################################
 # Parameters
 N_DIMS = 300  # Dimension of your vectors
-num_hyperplanes = 10 # Number of hyperplanes
-num_repeat_process = 15
+num_hyperplanes = 25 # Number of hyperplanes
+num_repeat_process = 25
 ####  if smaller bucket is selected then 2 ** num_hyperplanes, it still needs to be 2** k, 1024, 20248, 4096, 8192, 16384...
-num_buckets = min(5000000000, 2 ** num_hyperplanes)
+num_buckets = min(8192, 2 ** num_hyperplanes)
 
 planes_l = [np.random.normal(size=(N_DIMS, num_hyperplanes))
             for _ in range(num_repeat_process)]
@@ -908,25 +696,10 @@ np.random.seed(0)
 idx = 0
 planes = planes_l[idx]  # get one 'universe' of planes to test the function
 vec = np.random.rand(1, 300)
-'''
-print(f" The hash value for this vector,",
-      f"and the set of planes at index {idx},",
-      f"is {hash_value_of_vector(vec, planes)}")
 
-print("Done")
-'''
 
 # This is the code used to create a hash table: feel free to read over it
 def make_hash_table(vecs, planes, num_buckets):
-    """
-    Input:
-        - vecs: list of vectors to be hashed.
-        - planes: the matrix of planes in a single "universe", with shape (embedding dimensions, number of planes).
-    Output:
-        - hash_table: dictionary - keys are hashes, values are lists of vectors (hash buckets)
-        - id_table: dictionary - keys are hashes, values are list of vectors id's
-                            (it's used to know which tweet corresponds to the hashed vector)
-    """
 
     # number of planes is the number of columns in the planes matrix
     num_of_planes = planes.shape[1]
@@ -1151,8 +924,8 @@ def searchQueryDocument(bucketName, csvName, num_keywords):
 
 
 
-#searchQueryDocument("trecquery", "JK Rowling Reveals Why Harry Potter Named His Son After Professor Snape.csv", 10)
-searchQueryDocument("querycommonwebtableshuge", "1946FootballTeam--UniversityofMichiganAthletics.csv", 10)
+searchQueryDocument("trecquery", "JK Rowling Reveals Why Harry Potter Named His Son After Professor Snape.csv", 10)
+#searchQueryDocument("querycommonwebtableshuge", "1946FootballTeam--UniversityofMichiganAthletics.csv", 10)
 #searchQueryDocument("querycommonwebtableshuge", "PilotCountryAirportBrooksvilleFLX05FlightAware.csv+", 10)
 #searchQueryDocument("querycommonwebtableshuge", "2015PorscheMacanSSUVRatingsPricesTrimsSummaryJDPower.csv", 10)
 
